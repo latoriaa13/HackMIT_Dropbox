@@ -2,12 +2,15 @@ import { randomBytes } from "node:crypto";
 import { readJsonFile, writeJsonFile } from "../storage/json-store";
 import { microsoftAccountsPath } from "../storage/paths";
 import path from "node:path";
+import type { ConsentKind } from "./scopes";
 
 export type PendingOAuthState = {
   sessionId: string;
   nonce: string;
   scopes: string[];
   expiresAt: number;
+  consentKind?: ConsentKind;
+  returnTo?: string;
 };
 
 const TTL_MS = 10 * 60 * 1000;
@@ -49,7 +52,7 @@ function removeState(state: string) {
 export function createOAuthState(
   sessionId: string,
   scopes: string[],
-  _consentKind?: string
+  options?: { consentKind?: ConsentKind; returnTo?: string }
 ): { state: string; nonce: string } {
   const state = randomBytes(32).toString("base64url");
   const nonce = randomBytes(16).toString("base64url");
@@ -58,6 +61,8 @@ export function createOAuthState(
     nonce,
     scopes,
     expiresAt: Date.now() + TTL_MS,
+    consentKind: options?.consentKind,
+    returnTo: options?.returnTo,
   };
   persistState(state, entry);
   return { state, nonce };

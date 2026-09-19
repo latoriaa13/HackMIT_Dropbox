@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { QueueItem } from "@tuesday/core";
-import { markMicrosoftOAuthAttempt } from "@/lib/oauth-errors";
+import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
 
 type M365Session = {
   connected: boolean;
@@ -102,13 +102,15 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
       <div className="mt-3 border-t pt-3">
         <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
         <p className="mt-1 text-xs text-amber-900">Microsoft 365 connection required.</p>
-        <a
-          href={m365.connectUrl ?? "/api/auth/microsoft/connect"}
-          onClick={() => markMicrosoftOAuthAttempt()}
-          className="mt-2 inline-block rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white"
-        >
-          Connect Microsoft 365
-        </a>
+        <div className="mt-2">
+          <MicrosoftPermissionConnect
+            consent="full"
+            returnTo="/"
+            label="Connect Microsoft 365"
+            variant="primary"
+            className="!px-3 !py-1 !text-xs"
+          />
+        </div>
       </div>
     );
   }

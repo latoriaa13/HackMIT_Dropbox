@@ -7,7 +7,18 @@ const ERROR_HINTS: Record<string, string> = {
     "Microsoft sign-in failed: the app client secret is wrong or expired. Update MICROSOFT_CLIENT_SECRET in .env.local, restart the dev server, then connect again.",
   oauth_token_exchange_failed:
     "Microsoft sign-in could not be completed. Check Entra app credentials in .env.local and try Connect again.",
+  calendar_connected:
+    "Outlook calendar connected — you can refresh your calendar and build a schedule on the weekly plan.",
+  mail_connected:
+    "Outlook mail connected — you can draft email in Autopilot and on the weekly queue.",
+  connected:
+    "Microsoft 365 connected — calendar and mail features are available when permissions were granted.",
 };
+
+export function formatOAuthReturnMessage(code: string): string {
+  if (ERROR_HINTS[code]) return ERROR_HINTS[code];
+  return formatAutopilotOAuthError(code);
+}
 
 export function formatAutopilotOAuthError(code: string): string {
   if (ERROR_HINTS[code]) return ERROR_HINTS[code];

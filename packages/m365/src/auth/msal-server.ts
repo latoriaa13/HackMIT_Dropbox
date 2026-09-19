@@ -3,7 +3,6 @@ import {
   type ConfidentialClientApplication as Cca,
 } from "@azure/msal-node";
 import { getM365Env, isM365Configured } from "../config/env";
-import { scopesForConsent, type ConsentKind } from "./scopes";
 import { readMsalCacheSerialized, writeMsalCacheSerialized } from "./msal-cache-store";
 
 export function createMsalClient(options?: { requireSecret?: boolean }): Cca {
@@ -38,17 +37,18 @@ export async function persistMsalCacheFromClient(client: Cca, sessionUserId: str
 export async function getAuthCodeUrl(input: {
   state: string;
   nonce: string;
-  consent?: ConsentKind;
+  scopes: string[];
+  /** Use consent when adding calendar/mail to an existing Microsoft session. */
+  prompt?: "consent" | "select_account" | "login";
 }): Promise<string> {
   const client = createMsalClient({ requireSecret: false });
   const env = getM365Env();
-  const scopes = scopesForConsent(input.consent ?? "full");
   return client.getAuthCodeUrl({
-    scopes,
+    scopes: input.scopes,
     redirectUri: env.redirectUri,
     state: input.state,
     nonce: input.nonce,
-    prompt: "select_account",
+    prompt: input.prompt ?? "select_account",
   });
 }
 

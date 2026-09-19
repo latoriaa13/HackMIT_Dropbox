@@ -41,3 +41,17 @@ export function hasCalendarScopes(granted: string[]): boolean {
 export function hasMailScopes(granted: string[]): boolean {
   return granted.some((s) => s.includes("Mail.Read") || s.includes("Mail.Send"));
 }
+
+/** Union scopes for incremental consent (keep mail when adding calendar, etc.). */
+export function mergeGrantedScopes(existing: string[] | undefined, incoming: string[]): string[] {
+  return [...new Set([...(existing ?? []), ...incoming])];
+}
+
+export function scopesForIncrementalConsent(
+  kind: ConsentKind,
+  existingGranted?: string[]
+): string[] {
+  const requested = scopesForConsent(kind);
+  if (kind === "full" || !existingGranted?.length) return requested;
+  return mergeGrantedScopes(existingGranted, requested);
+}

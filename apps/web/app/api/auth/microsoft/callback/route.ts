@@ -5,6 +5,8 @@ import {
   fetchMicrosoftProfile,
   isM365Configured,
   saveMicrosoftAccount,
+  getMicrosoftAccount,
+  mergeGrantedScopes,
   scopesForConsent,
 } from "@tuesday/m365";
 import {
@@ -70,16 +72,24 @@ export async function GET(request: Request) {
     const result = await exchangeCodeAndPersist(sessionId, code, scopes);
     const profile = await fetchMicrosoftProfile(result.accessToken);
     const account = result.account;
+    const prior = getMicrosoftAccount(sessionId);
+    const fromToken = result.scopes?.length ? result.scopes : scopes;
     saveMicrosoftAccount({
       sessionUserId: sessionId,
       homeAccountId: account?.homeAccountId ?? profile.id,
       displayName: profile.displayName,
       email: profile.email || account?.username || "",
       tenantId: account?.tenantId ?? "common",
-      grantedScopes: result.scopes?.length ? result.scopes : scopes,
-      connectedAt: new Date().toISOString(),
+      grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken),
+      connectedAt: prior?.connectedAt ?? new Date().toISOString(),
     });
-    return redirectWithSession("/autopilot?connected=1", sessionId);
+
+    const returnTo = pending.returnTo?.startsWith("/") ? pending.returnTo : "/autopilot";
+    const qs = new URLSearchParams();
+    if (pending.consentKind === "calendar") qs.set("calendar_connected", "1");
+    else if (pending.consentKind === "mail") qs.set("mail_connected", "1");
+    else qs.set("connected", "1");
+    return redirectWithSession(`${returnTo}?${qs.toString()}`, sessionId);
   } catch (e) {
     const raw = e instanceof Error ? e.message : "callback_failed";
     const reason =

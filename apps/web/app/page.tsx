@@ -14,6 +14,8 @@ import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
 import { CalendarAwareScheduleView } from "@/components/CalendarAwareScheduleView";
 import { formatCurrency } from "@/lib/format";
 import { applyFeedbackDeprioritize, feedbackCount } from "@/lib/feedback";
+import { formatM365UserError } from "@/lib/m365-user-errors";
+import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
 
 const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
   { value: "protect_renewals", label: "Protect renewals" },
@@ -52,7 +54,7 @@ export default function WeeklyPlanPage() {
   const [lunchEndHour, setLunchEndHour] = useState(13);
   const [bufferMinutes, setBufferMinutes] = useState(15);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReturnType<typeof formatM365UserError> | null>(null);
   const [result, setResult] = useState<BuildTuesdayResult | null>(null);
   const [schedule, setSchedule] = useState<CalendarAwareSchedule | null>(null);
   const [outlookConnected, setOutlookConnected] = useState(false);
@@ -103,7 +105,10 @@ export default function WeeklyPlanPage() {
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message ?? data.error ?? "Schedule build failed");
+        if (!res.ok) {
+          setError(formatM365UserError(data));
+          return;
+        }
         setSchedule(data.schedule);
         setResult({
           ...data.queueResult,
@@ -125,7 +130,7 @@ export default function WeeklyPlanPage() {
       }
       setFeedbackTotal(feedbackCount());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Build failed");
+      setError({ title: "Build failed", detail: e instanceof Error ? e.message : "Build failed" });
     } finally {
       setLoading(false);
     }
@@ -372,7 +377,19 @@ export default function WeeklyPlanPage() {
       </section>
 
       {error && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm">{error}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950">
+          <p className="font-medium">{error.title}</p>
+          <p className="mt-1">{error.detail}</p>
+          {error.action && (
+            <MicrosoftPermissionConnect
+              consent={error.action.consent}
+              returnTo={error.action.returnTo ?? "/"}
+              label={error.action.label}
+              variant="primary"
+              className="mt-3"
+            />
+          )}
+        </div>
       )}
 
       {result && (

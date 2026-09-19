@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   consumeMicrosoftOAuthReturn,
-  formatAutopilotOAuthError,
+  formatOAuthReturnMessage,
   markMicrosoftOAuthAttempt,
 } from "@/lib/oauth-errors";
+import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
 
 type Status = {
   connected: boolean;
@@ -65,11 +66,15 @@ export default function AutopilotPage() {
     const p = new URLSearchParams(window.location.search);
     const connected = p.get("connected");
     const error = p.get("error");
-    if (connected) {
-      setMsg("Microsoft 365 connected — approve drafts to send through Microsoft Graph.");
+    const calendarConnected = p.get("calendar_connected");
+    const mailConnected = p.get("mail_connected");
+    if ((connected || calendarConnected || mailConnected) && consumeMicrosoftOAuthReturn()) {
+      const code = calendarConnected ? "calendar_connected" : mailConnected ? "mail_connected" : "connected";
+      setMsg(formatOAuthReturnMessage(code));
       window.history.replaceState({}, "", "/autopilot");
+      refresh();
     } else if (error && consumeMicrosoftOAuthReturn()) {
-      setMsg(formatAutopilotOAuthError(error));
+      setMsg(formatOAuthReturnMessage(error));
       window.history.replaceState({}, "", "/autopilot");
     } else if (error) {
       window.history.replaceState({}, "", "/autopilot");
@@ -183,20 +188,14 @@ export default function AutopilotPage() {
                 </a>
               )}
               {status.connected && status.missingCalendarConsent && (
-                <a
-                  href="/api/auth/microsoft/connect?consent=calendar"
-                  className="rounded-lg border px-3 py-2 text-sm"
-                >
-                  Request calendar access
-                </a>
+                <MicrosoftPermissionConnect
+                  consent="calendar"
+                  returnTo="/autopilot"
+                  label="Connect calendar"
+                />
               )}
               {status.connected && status.missingMailConsent && (
-                <a
-                  href="/api/auth/microsoft/connect?consent=mail"
-                  className="rounded-lg border px-3 py-2 text-sm"
-                >
-                  Request mail access
-                </a>
+                <MicrosoftPermissionConnect consent="mail" returnTo="/autopilot" label="Connect mail" />
               )}
               {status.connected && (
                 <button
