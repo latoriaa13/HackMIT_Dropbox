@@ -4,11 +4,11 @@ import {
   appendAudit,
   getEmailDraft,
   getEventDraft,
-  getMicrosoft365Provider,
-  isM365AuthError,
+  requireMicrosoft365Provider,
   recordConstituentActivity,
 } from "@tuesday/m365";
 import { getSessionUserId } from "@/lib/session";
+import { m365ApiErrorResponse } from "@/lib/m365-response";
 
 const Schema = z.object({
   kind: z.enum(["email", "event"]),
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, status: "rejected" });
     }
 
-    const provider = getMicrosoft365Provider(userId);
+    const provider = requireMicrosoft365Provider(userId);
     if (body.kind === "email") {
       const sent = await provider.sendEmailDraft({
         draftId: body.draftId,
@@ -58,9 +58,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(sent);
   } catch (e) {
-    if (isM365AuthError(e)) {
-      return NextResponse.json(e.toJSON(), { status: 403 });
-    }
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 400 });
+    return m365ApiErrorResponse(e);
   }
 }

@@ -6,7 +6,9 @@ import Link from "next/link";
 type Status = {
   connected: boolean;
   mode: string;
-  provider?: "microsoft-graph" | "mock";
+  provider?: "microsoft-graph";
+  configurationError?: boolean;
+  connectUrl?: string;
   accountEmail: string | null;
   accountName: string | null;
   displayName?: string;
@@ -62,7 +64,7 @@ export default function AutopilotPage() {
   useEffect(() => {
     refresh();
     const p = new URLSearchParams(window.location.search);
-    if (p.get("connected")) setMsg("Microsoft 365 connected — real Graph mode when you approve sends.");
+    if (p.get("connected")) setMsg("Microsoft 365 connected — approve drafts to send through Microsoft Graph.");
     if (p.get("error")) {
       const code = p.get("error")!;
       setMsg(ERROR_HINTS[code] ?? decodeURIComponent(code));
@@ -117,8 +119,8 @@ export default function AutopilotPage() {
       <header>
         <h1 className="text-2xl font-semibold">Tuesday Autopilot</h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-          Prepare outreach through Microsoft 365 with explicit approval. Mock mode runs without credentials —
-          nothing is sent to real mailboxes until Graph is connected and you approve.
+          Prepare outreach through your Microsoft 365 mailbox and calendar. Every send and calendar invitation
+          requires explicit approval in the inbox below.
         </p>
         <Link href="/" className="mt-2 inline-block text-sm text-[var(--accent)] hover:underline">
           ← Back to weekly plan
@@ -134,11 +136,7 @@ export default function AutopilotPage() {
             <p>
               Provider:{" "}
               <strong>
-                {status.provider === "microsoft-graph"
-                  ? status.connected
-                    ? "Microsoft Graph (connected)"
-                    : "Microsoft Graph (disconnected)"
-                  : "Mock preview"}
+                {status.connected ? "Microsoft Graph (connected)" : "Microsoft Graph (not connected)"}
               </strong>
             </p>
             {(status.displayName || status.accountName) && (
@@ -154,19 +152,20 @@ export default function AutopilotPage() {
                 {e}
               </p>
             ))}
-            {!status.oauthConfigured && (
-              <p className="text-[var(--muted)]">
-                Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and SESSION_SECRET in `.env.local`.
+            {(status.configurationError || !status.oauthConfigured) && (
+              <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-900">
+                Microsoft Entra configuration is missing. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and
+                SESSION_SECRET in `.env.local`.
               </p>
             )}
             {status.oauthConfigured && !status.connected && (
               <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                Operations use mock data until you connect. Approved sends will not reach real mailboxes until signed in.
+                Microsoft 365 connection required — connect to draft email, find meeting times, and run automation tasks.
               </p>
             )}
-            {status.connected && status.provider === "microsoft-graph" && (
+            {status.connected && (
               <p className="rounded border border-green-200 bg-green-50 px-3 py-2 text-green-900">
-                Real Microsoft Graph — approving email/event drafts can send through your mailbox and calendar.
+                Connected — approving drafts sends through your Microsoft mailbox and calendar.
               </p>
             )}
             {status.grantedScopes?.length > 0 && (
@@ -175,7 +174,7 @@ export default function AutopilotPage() {
             <div className="flex flex-wrap gap-2 pt-2">
               {status.oauthConfigured && !status.connected && (
                 <a
-                  href="/api/auth/microsoft/connect"
+                  href={status.connectUrl ?? "/api/auth/microsoft/connect"}
                   className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
                 >
                   Connect Microsoft 365
@@ -217,7 +216,10 @@ export default function AutopilotPage() {
 
       <section className="rounded-xl border bg-white p-5">
         <h2 className="font-semibold">Approval inbox</h2>
-        {emails.length === 0 && events.length === 0 && (
+        {!status?.connected && (
+          <p className="mt-2 text-sm text-amber-900">Connect Microsoft 365 to create and approve drafts.</p>
+        )}
+        {status?.connected && emails.length === 0 && events.length === 0 && (
           <p className="mt-2 text-sm text-[var(--muted)]">No pending drafts. Use Draft follow-up on the weekly queue.</p>
         )}
         {events.map((d) => (
@@ -226,9 +228,7 @@ export default function AutopilotPage() {
             <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs">
               {d.body ?? d.bodyPreview}
             </pre>
-            <p className="mt-1 text-xs text-amber-800">
-              {d.mode === "microsoft_graph" ? "Microsoft Graph" : "Mock preview"} — invitations require approval
-            </p>
+            <p className="mt-1 text-xs text-amber-800">Microsoft Graph — invitations require approval</p>
             <div className="mt-2 flex gap-2">
               <button type="button" className="rounded bg-[var(--accent)] px-3 py-1 text-xs text-white" onClick={() => approve("event", d, "approve")}>
                 Approve send invitations
@@ -246,9 +246,7 @@ export default function AutopilotPage() {
             <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs">
               {d.body ?? d.bodyPreview}
             </pre>
-            <p className="mt-1 text-xs text-amber-800">
-              {d.mode === "microsoft_graph" ? "Microsoft Graph" : "Mock preview"} — send requires approval
-            </p>
+            <p className="mt-1 text-xs text-amber-800">Microsoft Graph — send requires approval</p>
             <div className="mt-2 flex gap-2">
               <button type="button" className="rounded bg-[var(--accent)] px-3 py-1 text-xs text-white" onClick={() => approve("email", d, "approve")}>
                 Approve send
@@ -264,7 +262,12 @@ export default function AutopilotPage() {
       <section className="rounded-xl border bg-white p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Automation tasks</h2>
-          <button type="button" onClick={createTask} className="rounded-lg border px-3 py-1 text-sm">
+          <button
+            type="button"
+            disabled={!status?.connected}
+            onClick={createTask}
+            className="rounded-lg border px-3 py-1 text-sm disabled:opacity-50"
+          >
             + Weekly top-5 template
           </button>
         </div>

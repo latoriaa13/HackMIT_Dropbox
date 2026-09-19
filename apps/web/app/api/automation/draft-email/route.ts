@@ -3,11 +3,12 @@ import { z } from "zod";
 import {
   checkEmailOutreachEligible,
   generateFollowUpEmail,
-  getMicrosoft365Provider,
+  requireMicrosoft365Provider,
   recordConstituentActivity,
 } from "@tuesday/m365";
 import { getProfile, loadDataset } from "@/lib/data-store";
 import { getSessionUserId } from "@/lib/session";
+import { m365ApiErrorResponse } from "@/lib/m365-response";
 
 const Schema = z.object({
   constituentId: z.string(),
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
       recommendedAction: body.recommendedAction,
       whyNow: body.whyNow,
     });
-    const provider = getMicrosoft365Provider(userId);
+    const provider = requireMicrosoft365Provider(userId);
     const draft = await provider.createEmailDraft({
       to: [elig.to!],
       subject,
@@ -50,6 +51,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ draft, subject, body: text, mode: draft.mode });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    return m365ApiErrorResponse(e);
   }
 }

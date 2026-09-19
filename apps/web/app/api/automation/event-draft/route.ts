@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { CreateEventInputSchema, getMicrosoft365Provider, checkEmailOutreachEligible } from "@tuesday/m365";
+import { CreateEventInputSchema, requireMicrosoft365Provider, checkEmailOutreachEligible } from "@tuesday/m365";
 import { getProfile, loadDataset } from "@/lib/data-store";
 import { getSessionUserId } from "@/lib/session";
+import { m365ApiErrorResponse } from "@/lib/m365-response";
 import { z } from "zod";
 
 const Schema = CreateEventInputSchema.extend({
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
     if (!elig.ok && profile.doNotSolicit) {
       return NextResponse.json({ error: "Cannot schedule", reasons: elig.reasons }, { status: 400 });
     }
-    const provider = getMicrosoft365Provider(userId);
+    const provider = requireMicrosoft365Provider(userId);
     const { constituentId, ...eventInput } = body;
     const draft = await provider.createEventDraft({
       ...eventInput,
@@ -27,6 +28,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ draft });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Failed" }, { status: 400 });
+    return m365ApiErrorResponse(e);
   }
 }

@@ -24,7 +24,7 @@ function save(store: DraftStore) {
 export function createEmailDraftRecord(
   userId: string,
   input: { to: string[]; subject: string; body: string; relatedConstituentIds?: string[] },
-  mode: "mock" | "microsoft_graph" = "mock"
+  mode: "microsoft_graph" = "microsoft_graph"
 ): EmailDraft & { body: string; userId: string; relatedConstituentIds?: string[] } {
   const store = load();
   const draftId = randomUUID();
@@ -49,7 +49,7 @@ export function createEmailDraftRecord(
 export function createEventDraftRecord(
   userId: string,
   input: CreateEventInputInternal,
-  mode: "mock" | "microsoft_graph"
+  mode: "microsoft_graph"
 ): EventDraft & { body: string; userId: string } {
   const store = load();
   const draftId = randomUUID();

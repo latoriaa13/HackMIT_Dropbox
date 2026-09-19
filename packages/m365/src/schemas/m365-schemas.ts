@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ConnectionStatusSchema = z.object({
   connected: z.boolean(),
-  mode: z.enum(["mock", "microsoft_graph"]),
+  mode: z.literal("microsoft_graph"),
   accountEmail: z.string().nullable(),
   accountName: z.string().nullable(),
   grantedScopes: z.array(z.string()),
@@ -68,7 +68,7 @@ export const EventDraftSchema = z.object({
   attendees: z.array(z.string()),
   bodyPreview: z.string(),
   status: z.literal("draft"),
-  mode: z.enum(["mock", "microsoft_graph"]),
+  mode: z.literal("microsoft_graph"),
 });
 export type EventDraft = z.infer<typeof EventDraftSchema>;
 
@@ -81,7 +81,7 @@ export type SendEventInput = z.infer<typeof SendEventInputSchema>;
 export const SentEventSchema = z.object({
   eventId: z.string(),
   draftId: z.string(),
-  status: z.enum(["sent_mock", "sent_graph"]),
+  status: z.literal("sent_graph"),
   message: z.string(),
 });
 export type SentEvent = z.infer<typeof SentEventSchema>;
@@ -116,7 +116,7 @@ export const EmailDraftSchema = z.object({
   subject: z.string(),
   bodyPreview: z.string(),
   status: z.literal("draft"),
-  mode: z.enum(["mock", "microsoft_graph"]),
+  mode: z.literal("microsoft_graph"),
 });
 export type EmailDraft = z.infer<typeof EmailDraftSchema>;
 
@@ -129,7 +129,7 @@ export type SendEmailDraftInput = z.infer<typeof SendEmailDraftInputSchema>;
 export const SentEmailSchema = z.object({
   messageId: z.string(),
   draftId: z.string(),
-  status: z.enum(["sent_mock", "sent_graph"]),
+  status: z.literal("sent_graph"),
   message: z.string(),
 });
 export type SentEmail = z.infer<typeof SentEmailSchema>;

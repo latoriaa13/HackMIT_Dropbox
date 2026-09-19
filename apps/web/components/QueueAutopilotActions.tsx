@@ -1,15 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { QueueItem } from "@tuesday/core";
+
+type M365Session = {
+  connected: boolean;
+  oauthConfigured?: boolean;
+  configurationError?: boolean;
+  missingCalendarConsent?: boolean;
+  missingMailConsent?: boolean;
+  connectUrl?: string;
+  message?: string;
+};
 
 export function QueueAutopilotActions({ item }: { item: QueueItem }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [draft, setDraft] = useState<{ draftId: string; approvalToken: string } | null>(null);
+  const [m365, setM365] = useState<M365Session | null>(null);
   const [slots, setSlots] = useState<Array<{ start: string; end: string }>>([]);
 
+  useEffect(() => {
+    fetch("/api/auth/microsoft/session")
+      .then((r) => r.json())
+      .then(setM365);
+  }, []);
+
+  const connected = m365?.connected === true;
+  const canMail = connected && !m365?.missingMailConsent;
+  const canCalendar = connected && !m365?.missingCalendarConsent;
+
   const draftEmail = async () => {
+    if (!canMail) {
+      setMsg(m365?.message ?? "Microsoft 365 connection required for email drafts.");
+      return;
+    }
     setLoading(true);
     setMsg(null);
     try {
@@ -23,9 +47,8 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? data.reasons?.join(", "));
-      setDraft({ draftId: data.draft.draftId, approvalToken: data.draft.approvalToken });
-      setMsg(`Draft ready (${data.draft.mode} mode) — approve in Autopilot inbox.`);
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed");
+      setMsg("Email draft ready — approve in Autopilot inbox.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -34,6 +57,10 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
   };
 
   const findTime = async () => {
+    if (!canCalendar) {
+      setMsg(m365?.message ?? "Calendar access required — connect Microsoft 365.");
+      return;
+    }
     setLoading(true);
     const now = new Date();
     const end = new Date(now.getTime() + 7 * 86400000);
@@ -51,9 +78,9 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed");
       setSlots(data.slots?.slice(0, 5) ?? []);
-      setMsg("Proposed slots (mock or your calendar). Select one in Autopilot to draft an event.");
+      setMsg("Available slots from your Microsoft calendar — select one to draft an event.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -61,13 +88,36 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
     }
   };
 
+  if (m365 && !m365.oauthConfigured) {
+    return (
+      <div className="mt-3 border-t pt-3 text-xs text-amber-900">
+        Microsoft Entra is not configured on this server. Autopilot actions are unavailable.
+      </div>
+    );
+  }
+
+  if (m365 && !connected) {
+    return (
+      <div className="mt-3 border-t pt-3">
+        <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
+        <p className="mt-1 text-xs text-amber-900">Microsoft 365 connection required.</p>
+        <a
+          href={m365.connectUrl ?? "/api/auth/microsoft/connect"}
+          className="mt-2 inline-block rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white"
+        >
+          Connect Microsoft 365
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-3 border-t pt-3">
-      <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
+      <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot · Microsoft Graph</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={loading}
+          disabled={loading || !canMail}
           onClick={draftEmail}
           className="rounded-lg border px-2 py-1 text-xs hover:bg-stone-50 disabled:opacity-50"
         >
@@ -75,7 +125,7 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
         </button>
         <button
           type="button"
-          disabled={loading}
+          disabled={loading || !canCalendar}
           onClick={findTime}
           className="rounded-lg border px-2 py-1 text-xs hover:bg-stone-50 disabled:opacity-50"
         >
@@ -88,19 +138,24 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
           Open Autopilot
         </a>
       </div>
-      {msg && <p className="mt-2 text-xs text-stone-600">{msg}</p>}
-      {draft && (
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          Pending draft {draft.draftId.slice(0, 8)}…
-        </p>
+      {!canMail && connected && (
+        <a href="/api/auth/microsoft/connect?consent=mail" className="mt-1 block text-xs text-[var(--accent)]">
+          Mail access required
+        </a>
       )}
+      {!canCalendar && connected && (
+        <a href="/api/auth/microsoft/connect?consent=calendar" className="mt-1 block text-xs text-[var(--accent)]">
+          Calendar access required
+        </a>
+      )}
+      {msg && <p className="mt-2 text-xs text-stone-600">{msg}</p>}
       {slots.length > 0 && (
         <ul className="mt-1 space-y-1 text-xs">
           {slots.map((s) => (
             <li key={s.start}>
               <button
                 type="button"
-                disabled={loading}
+                disabled={loading || !canCalendar}
                 className="text-left text-[var(--accent)] hover:underline disabled:opacity-50"
                 onClick={async () => {
                   setLoading(true);
@@ -120,8 +175,8 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
                       }),
                     });
                     const data = await res.json();
-                    if (!res.ok) throw new Error(data.error ?? "Failed");
-                    setMsg(`Event draft created (${data.draft.mode}) — review in Autopilot inbox.`);
+                    if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed");
+                    setMsg("Event draft created — review in Autopilot inbox.");
                   } catch (e) {
                     setMsg(e instanceof Error ? e.message : "Failed");
                   } finally {

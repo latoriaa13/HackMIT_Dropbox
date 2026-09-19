@@ -1,7 +1,7 @@
 export * from "./schemas/m365-schemas";
 export * from "./provider/interface";
 export * from "./provider/factory";
-export * from "./provider/mock-provider";
+export * from "./provider/graph-provider";
 export * from "./config/env";
 export * from "./auth/scopes";
 export * from "./auth/msal-server";
@@ -11,6 +11,8 @@ export * from "./auth/ms-token-service";
 export * from "./auth/session-info";
 export * from "./auth/disconnect";
 export * from "./auth/errors";
+export * from "./http/api-errors";
+export * from "./calendar/compute-free-slots";
 export * from "./drafts/grounded-email";
 export * from "./automation/task-model";
 export * from "./automation/task-store";

@@ -1,4 +1,5 @@
 import type { Microsoft365Provider } from "../provider/interface";
+import { requireMicrosoft365Provider } from "../provider/factory";
 import {
   CreateEmailDraftInputSchema,
   CreateEventInputSchema,
@@ -45,4 +46,14 @@ export async function invokeM365Tool(
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
+}
+
+/** Invoke an MCP tool using the authenticated user's Microsoft Graph session only. */
+export async function invokeM365ToolForUser(
+  sessionUserId: string,
+  tool: M365ToolName,
+  input: unknown
+) {
+  const provider = requireMicrosoft365Provider(sessionUserId);
+  return invokeM365Tool(provider, tool, input);
 }

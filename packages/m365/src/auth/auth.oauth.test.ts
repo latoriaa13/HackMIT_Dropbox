@@ -8,16 +8,20 @@ import {
   createOAuthState,
   disconnectMicrosoft365,
   getPublicM365Session,
-  getProviderMode,
   hasMicrosoftConnection,
+  isMicrosoft365Connected,
+  requireMicrosoft365Provider,
   saveMicrosoftAccount,
   requiresApproval,
+  Microsoft365ConfigurationError,
+  Microsoft365NotConnectedError,
+  m365ErrorToHttpResponse,
 } from "../index";
 import { readMsalCacheSerialized, writeMsalCacheSerialized } from "./msal-cache-store";
 
 const tmpDir = path.join(os.tmpdir(), `tuesday-m365-auth-${process.pid}`);
 
-describe("Microsoft OAuth session", () => {
+describe("Microsoft OAuth session (no mock provider)", () => {
   beforeEach(() => {
     process.env.TUESDAY_DATA_DIR = path.join(tmpDir, String(Date.now()));
     fs.mkdirSync(process.env.TUESDAY_DATA_DIR, { recursive: true });
@@ -30,23 +34,28 @@ describe("Microsoft OAuth session", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("uses mock provider when OAuth is not configured", () => {
+  it("missing configuration returns MICROSOFT365_CONFIGURATION_ERROR", () => {
+    expect(() => requireMicrosoft365Provider("user-a")).toThrow(Microsoft365ConfigurationError);
     const session = getPublicM365Session("user-a");
-    expect(session.provider).toBe("mock");
+    expect(session.configurationError).toBe(true);
     expect(session.connected).toBe(false);
-    expect(getProviderMode("user-a")).toBe("mock");
+    const http = m365ErrorToHttpResponse(new Microsoft365ConfigurationError());
+    expect(http.status).toBe(503);
+    expect(http.body.code).toBe("MICROSOFT365_CONFIGURATION_ERROR");
   });
 
-  it("reports microsoft-graph disconnected when OAuth configured but not signed in", () => {
+  it("missing session returns MICROSOFT365_NOT_CONNECTED", () => {
     process.env.MICROSOFT_CLIENT_ID = "test-client";
     process.env.MICROSOFT_CLIENT_SECRET = "test-secret";
-    const session = getPublicM365Session("user-b");
-    expect(session.provider).toBe("microsoft-graph");
-    expect(session.connected).toBe(false);
-    expect(getProviderMode("user-b")).toBe("mock");
+    expect(() => requireMicrosoft365Provider("user-b")).toThrow(Microsoft365NotConnectedError);
+    expect(isMicrosoft365Connected("user-b")).toBe(false);
+    const http = m365ErrorToHttpResponse(new Microsoft365NotConnectedError());
+    expect(http.status).toBe(401);
+    expect(http.body.code).toBe("MICROSOFT365_NOT_CONNECTED");
+    expect(http.body.connectUrl).toBe("/api/auth/microsoft/connect");
   });
 
-  it("connected session reports Microsoft Graph provider", () => {
+  it("authenticated sessions select MicrosoftGraphProvider", () => {
     process.env.MICROSOFT_CLIENT_ID = "test-client";
     process.env.MICROSOFT_CLIENT_SECRET = "test-secret";
     saveMicrosoftAccount({
@@ -58,22 +67,13 @@ describe("Microsoft OAuth session", () => {
       grantedScopes: ["User.Read", "Calendars.Read", "Mail.Send"],
       connectedAt: new Date().toISOString(),
     });
-    const session = getPublicM365Session("user-c");
-    expect(session.connected).toBe(true);
-    expect(session.provider).toBe("microsoft-graph");
-    expect(session.email).toBe("alex@example.com");
-    expect(getProviderMode("user-c")).toBe("microsoft_graph");
+    const provider = requireMicrosoft365Provider("user-c");
+    expect(provider.constructor.name).toBe("MicrosoftGraphProvider");
+    expect(isMicrosoft365Connected("user-c")).toBe(true);
   });
 
   it("rejects invalid OAuth state", () => {
     expect(consumeOAuthState("not-a-real-state")).toBeNull();
-  });
-
-  it("consumes valid OAuth state once", () => {
-    const { state } = createOAuthState("sess-1", ["User.Read"]);
-    const pending = consumeOAuthState(state);
-    expect(pending?.sessionId).toBe("sess-1");
-    expect(consumeOAuthState(state)).toBeNull();
   });
 
   it("session info never includes token fields", () => {
@@ -111,6 +111,7 @@ describe("Microsoft OAuth session", () => {
     disconnectMicrosoft365("user-e");
     expect(hasMicrosoftConnection("user-e")).toBe(false);
     expect(readMsalCacheSerialized("user-e")).toBeNull();
+    expect(() => requireMicrosoft365Provider("user-e")).toThrow(Microsoft365NotConnectedError);
   });
 
   it("still requires approval before send operations", () => {

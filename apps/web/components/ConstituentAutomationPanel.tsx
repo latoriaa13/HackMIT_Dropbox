@@ -43,7 +43,7 @@ export function ConstituentAutomationPanel({
     <section className="rounded-xl border bg-white p-5">
       <h2 className="font-semibold">Automation</h2>
       <p className="mt-1 text-sm text-[var(--muted)]">
-        Drafts and sends go through approval. Microsoft 365 optional (mock mode without credentials).
+        Drafts and sends use Microsoft Graph with explicit approval. Connect Microsoft 365 to enable actions.
       </p>
       {queueItem && <QueueAutopilotActions item={queueItem} />}
       {activity.length > 0 && (

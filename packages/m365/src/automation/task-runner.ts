@@ -1,6 +1,6 @@
 import type { ProcessedDataset } from "@tuesday/core";
 import { buildTuesday } from "@tuesday/core";
-import { getMicrosoft365Provider } from "../provider/factory";
+import { requireMicrosoft365Provider } from "../provider/factory";
 import { generateFollowUpEmail, checkEmailOutreachEligible } from "../drafts/grounded-email";
 import { appendAudit } from "../storage/audit-log";
 import { recordConstituentActivity } from "../storage/constituent-activity";
@@ -16,7 +16,7 @@ export async function runAutomationTask(
   if (!task || task.status === "cancelled" || task.status === "paused") return null;
 
   updateTaskStatus(taskId, userId, "running");
-  const provider = getMicrosoft365Provider(userId);
+  const provider = requireMicrosoft365Provider(userId);
 
   try {
     for (const action of task.actions) {

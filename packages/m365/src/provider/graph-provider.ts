@@ -30,7 +30,7 @@ import {
   verifyApprovalToken,
 } from "../storage/draft-store";
 import { appendAudit } from "../storage/audit-log";
-import { MockMicrosoft365Provider } from "./mock-provider";
+import { computeFreeSlots } from "../calendar/compute-free-slots";
 
 function graphClient(accessToken: string) {
   return Client.init({
@@ -114,17 +114,7 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
       end: input.end,
       timezone: input.timezone,
     });
-    const mock = new MockMicrosoft365Provider(this.sessionUserId);
-    const candidates = await mock.findFreeSlots(input);
-    return candidates.filter((slot) => {
-      const s = new Date(slot.start).getTime();
-      const e = new Date(slot.end).getTime();
-      return !events.some((ev) => {
-        const es = new Date(ev.start).getTime();
-        const ee = new Date(ev.end).getTime();
-        return s < ee && e > es;
-      });
-    });
+    return computeFreeSlots(input, events);
   }
 
   async createEventDraft(input: CreateEventInput): Promise<EventDraft> {

@@ -9,12 +9,14 @@ export type PublicM365Session = {
   userId?: string;
   tenantId?: string;
   grantedScopes?: string[];
-  provider: "microsoft-graph" | "mock";
+  provider: "microsoft-graph";
   oauthConfigured: boolean;
+  configurationError?: boolean;
   configErrors?: string[];
   missingCalendarConsent?: boolean;
   missingMailConsent?: boolean;
   message?: string;
+  connectUrl?: string;
 };
 
 export function getPublicM365Session(sessionUserId: string): PublicM365Session {
@@ -22,9 +24,11 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
   if (!oauthConfigured) {
     return {
       connected: false,
-      provider: "mock",
+      provider: "microsoft-graph",
       oauthConfigured: false,
-      message: "Mock mode — Microsoft OAuth credentials are not configured.",
+      configurationError: true,
+      message: "Microsoft Entra configuration is missing. Autopilot requires Microsoft 365.",
+      connectUrl: "/api/auth/microsoft/connect",
     };
   }
 
@@ -36,7 +40,8 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
       provider: "microsoft-graph",
       oauthConfigured: true,
       configErrors: configErrors.length ? configErrors : undefined,
-      message: "Connect Microsoft 365 to use your calendar and mailbox.",
+      message: "Microsoft 365 connection required — connect to use calendar and mail.",
+      connectUrl: "/api/auth/microsoft/connect",
     };
   }
 
@@ -52,5 +57,6 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
     oauthConfigured: true,
     missingCalendarConsent: !hasCalendarScopes(scopes),
     missingMailConsent: !hasMailScopes(scopes),
+    connectUrl: "/api/auth/microsoft/connect",
   };
 }
