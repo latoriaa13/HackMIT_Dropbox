@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ensureServerSession } from "@/lib/session";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,8 +7,7 @@ export const metadata: Metadata = {
   description: "Where should your gift officers spend limited time this week?",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  await ensureServerSession();
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">

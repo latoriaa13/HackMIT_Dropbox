@@ -13,7 +13,7 @@
     "inspect:data": "tsx scripts/inspect-dataset.ts",
     "dev": "npm run dev -w @tuesday/web",
     "build": "npm run build -w @tuesday/web",
-    "test": "npm run test -w @tuesday/core && npm run test -w @tuesday/m365",
+    "test": "npm run test -w @tuesday/core && npm run test -w @tuesday/m365 && npm run test -w @tuesday/web",
     "start": "npm run start -w @tuesday/web"
   },
   "devDependencies": {

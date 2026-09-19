@@ -9,6 +9,7 @@ import {
 } from "@tuesday/m365";
 import {
   getSessionUserIdFromRequest,
+  verifySessionCookie,
   attachSessionCookie,
 } from "@/lib/session";
 
@@ -26,31 +27,31 @@ export async function GET(request: Request) {
   const req = request as import("next/server").NextRequest;
   const sessionId = getSessionUserIdFromRequest(req);
 
+  function redirectWithSession(path: string) {
+    const res = NextResponse.redirect(`${base}${path}`);
+    if (!verifySessionCookie(req.cookies.get("tuesday_session")?.value)) {
+      attachSessionCookie(res, sessionId, req);
+    }
+    return res;
+  }
+
   if (error) {
     const reason =
       error === "access_denied" ? "oauth_cancelled" : encodeURIComponent(errorDesc ?? error);
-    const res = NextResponse.redirect(`${base}/autopilot?error=${reason}`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession(`/autopilot?error=${reason}`);
   }
 
   if (!code || !state) {
-    const res = NextResponse.redirect(`${base}/autopilot?error=oauth_denied`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession("/autopilot?error=oauth_denied");
   }
 
   if (!isM365Configured()) {
-    const res = NextResponse.redirect(`${base}/autopilot?error=not_configured`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession("/autopilot?error=not_configured");
   }
 
   const pending = consumeOAuthState(state);
   if (!pending || pending.sessionId !== sessionId) {
-    const res = NextResponse.redirect(`${base}/autopilot?error=invalid_oauth_state`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession("/autopilot?error=invalid_oauth_state");
   }
 
   try {
@@ -67,13 +68,9 @@ export async function GET(request: Request) {
       grantedScopes: result.scopes?.length ? result.scopes : scopes,
       connectedAt: new Date().toISOString(),
     });
-    const res = NextResponse.redirect(`${base}/autopilot?connected=1`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession("/autopilot?connected=1");
   } catch (e) {
     const msg = encodeURIComponent(e instanceof Error ? e.message : "callback_failed");
-    const res = NextResponse.redirect(`${base}/autopilot?error=${msg}`);
-    attachSessionCookie(res, sessionId, req);
-    return res;
+    return redirectWithSession(`/autopilot?error=${msg}`);
   }
 }

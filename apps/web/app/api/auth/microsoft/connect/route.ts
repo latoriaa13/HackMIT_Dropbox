@@ -7,7 +7,11 @@ import {
   scopesForConsent,
   type ConsentKind,
 } from "@tuesday/m365";
-import { getSessionUserIdFromRequest, attachSessionCookie } from "@/lib/session";
+import {
+  attachSessionCookie,
+  getSessionUserIdFromRequest,
+  verifySessionCookie,
+} from "@/lib/session";
 
 function appBase(request: Request) {
   return process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin;
@@ -25,6 +29,7 @@ export async function GET(request: Request) {
   }
 
   const req = request as import("next/server").NextRequest;
+  const hadSession = !!verifySessionCookie(req.cookies.get("tuesday_session")?.value);
   const sessionId = getSessionUserIdFromRequest(req);
   const url = new URL(request.url);
   const consentParam = url.searchParams.get("consent");
@@ -38,7 +43,7 @@ export async function GET(request: Request) {
     const { state, nonce } = createOAuthState(sessionId, scopeList, consent);
     const authorizeUrl = await getAuthCodeUrl({ state, nonce, consent });
     const res = NextResponse.redirect(authorizeUrl);
-    attachSessionCookie(res, sessionId, req);
+    if (!hadSession) attachSessionCookie(res, sessionId, req);
     return res;
   } catch (e) {
     const msg = encodeURIComponent(e instanceof Error ? e.message : "OAuth failed");

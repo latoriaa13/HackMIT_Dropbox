@@ -55,6 +55,16 @@ export function sessionCookieOptions(secure: boolean) {
   };
 }
 
+/** Read-only session lookup for Server Components and other render paths. Never mutates cookies. */
+export async function getServerSession(): Promise<{ sessionId: string | null }> {
+  const jar = await cookies();
+  const sessionId = verifySessionCookie(jar.get(COOKIE)?.value);
+  return { sessionId };
+}
+
+/**
+ * Creates or resumes a signed session cookie. Call only from Route Handlers or Server Actions.
+ */
 export async function ensureServerSession(): Promise<string> {
   const jar = await cookies();
   const verified = verifySessionCookie(jar.get(COOKIE)?.value);
@@ -64,10 +74,8 @@ export async function ensureServerSession(): Promise<string> {
   return id;
 }
 
+/** Route Handlers: returns session id, creating a signed cookie when missing. */
 export async function getSessionUserId(): Promise<string> {
-  const jar = await cookies();
-  const verified = verifySessionCookie(jar.get(COOKIE)?.value);
-  if (verified) return verified;
   return ensureServerSession();
 }
 
@@ -82,9 +90,11 @@ export function attachSessionCookie(response: NextResponse, sessionId: string, r
   response.cookies.set(COOKIE, buildSessionCookieValue(sessionId), sessionCookieOptions(secure));
 }
 
-export function ensureSessionOnResponse(request: NextRequest, response: NextResponse) {
-  const existing = verifySessionCookie(request.cookies.get(COOKIE)?.value);
-  if (!existing) {
-    attachSessionCookie(response, newSessionId(), request);
-  }
+/** Ensures the response carries a session cookie (Route Handlers only). */
+export function ensureSessionCookieOnResponse(request: NextRequest, response: NextResponse): string {
+  const verified = verifySessionCookie(request.cookies.get(COOKIE)?.value);
+  if (verified) return verified;
+  const id = newSessionId();
+  attachSessionCookie(response, id, request);
+  return id;
 }
