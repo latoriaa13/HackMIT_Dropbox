@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-09-19T17:55:04.606Z",
+  "files": [
+    "activities.csv",
+    "affiliations.csv",
+    "campaigns.csv",
+    "career_history.csv",
+    "constituents.csv",
+    "degrees.csv",
+    "events.csv",
+    "event_attendance.csv",
+    "funds.csv",
+    "gifts.csv",
+    "gift_allocations.csv",
+    "interactions.csv",
+    "opportunities.csv",
+    "schools.csv",
+    "staff.csv"
+  ],
+  "meta": {
+    "schoolName": "GiveCampus University",
+    "constituentCount": 20000,
+    "donorCount": 6734,
+    "lybuntCount": 1002,
+    "currentFiscalYear": 2026,
+    "generatedAt": "2026-09-19T17:55:04.606Z"
+  }
+}

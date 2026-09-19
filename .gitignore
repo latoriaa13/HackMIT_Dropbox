@@ -1,0 +1,8 @@
+node_modules
+.next
+data/raw
+data/processed
+data/automation
+.env
+.env.local
+*.log

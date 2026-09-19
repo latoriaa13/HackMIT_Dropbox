@@ -1,0 +1,25 @@
+{
+  "name": "tuesday",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "dependencies": {
+    "@tuesday/core": "*"
+  },
+  "scripts": {
+    "ingest": "tsx scripts/ingest.ts",
+    "inspect:data": "tsx scripts/inspect-dataset.ts",
+    "dev": "npm run dev -w @tuesday/web",
+    "build": "npm run build -w @tuesday/web",
+    "test": "npm run test -w @tuesday/core && npm run test -w @tuesday/m365",
+    "start": "npm run start -w @tuesday/web"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.5.16",
+    "csv-parse": "^5.6.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
