@@ -100,7 +100,7 @@ Automation layer in `packages/m365` + `/autopilot`. The **weekly fundraising pla
 
 ### Environment variables
 
-Copy `.env.example` to `apps/web/.env.local` (or repo root):
+Copy `.env.example` to **`.env.local` at the repo root** or **`apps/web/.env.local`**, then restart `npm run dev`:
 
 | Variable | Purpose |
 |----------|---------|
