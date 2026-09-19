@@ -7,11 +7,12 @@ export function safeReturnPath(path: string | null | undefined, fallback = "/"):
 
 export function microsoftConnectHref(
   consent: ConsentKind = "full",
-  returnTo = "/"
+  returnTo = "/",
+  reauth = false
 ): string {
   const params = new URLSearchParams();
   if (consent !== "full") params.set("consent", consent);
   params.set("returnTo", safeReturnPath(returnTo));
-  const q = params.toString();
-  return q ? `/api/auth/microsoft/connect?${q}` : "/api/auth/microsoft/connect";
+  if (reauth) params.set("reauth", "1");
+  return `/api/auth/microsoft/connect?${params.toString()}`;
 }

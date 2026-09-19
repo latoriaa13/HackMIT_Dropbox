@@ -13,6 +13,7 @@ import type {
   ScheduleSummary,
 } from "./types";
 import { isoDate, parseWeekStart, weekRangeFromStart } from "./week-utils";
+import { isBlockingOutlookEvent, outlookEventDisplayLabel } from "./outlook-busy";
 
 type TimeInterval = { startMs: number; endMs: number };
 
@@ -102,23 +103,28 @@ export function buildCalendarAwareSchedule(input: {
   const timeline: ScheduleTimelineEntry[] = [];
   const busyByDay = new Map<string, OutlookBusyBlock[]>();
 
+  const blockingEvents = input.outlookEvents.filter(isBlockingOutlookEvent);
+
   for (const ev of input.outlookEvents) {
     const day = ev.start.slice(0, 10);
     if (!busyByDay.has(day)) busyByDay.set(day, []);
     busyByDay.get(day)!.push(ev);
+    const blocking = isBlockingOutlookEvent(ev);
     timeline.push({
       id: `outlook-${ev.id}`,
       kind: "outlook_event",
       date: day,
       start: ev.start,
       end: ev.end,
-      label: ev.isPrivate ? "Busy / private event" : ev.subject,
-      detail: ev.location,
+      label: blocking ? `Busy (Outlook) · ${outlookEventDisplayLabel(ev)}` : outlookEventDisplayLabel(ev),
+      detail: blocking
+        ? [ev.location, "Tuesday will not schedule fundraising work during this block."].filter(Boolean).join(" · ")
+        : ev.location,
       outlookEventId: ev.id,
     });
   }
 
-  const placedBusy: TimeInterval[] = input.outlookEvents.map((ev) => ({
+  const placedBusy: TimeInterval[] = blockingEvents.map((ev) => ({
     startMs: new Date(ev.start).getTime(),
     endMs: new Date(ev.end).getTime(),
   }));

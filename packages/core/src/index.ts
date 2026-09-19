@@ -27,3 +27,4 @@ export * from "./scheduling/types";
 export * from "./scheduling/planner";
 export * from "./scheduling/tasks-from-queue";
 export * from "./scheduling/week-utils";
+export * from "./scheduling/outlook-busy";

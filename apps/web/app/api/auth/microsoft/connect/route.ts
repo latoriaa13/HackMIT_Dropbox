@@ -41,7 +41,8 @@ export async function GET(request: Request) {
 
   const existing = getMicrosoftAccount(sessionId);
   const scopeList = scopesForIncrementalConsent(consent, existing?.grantedScopes);
-  const prompt = consent === "basic" && existing ? "select_account" : "consent";
+  const reauth = url.searchParams.get("reauth") === "1";
+  const prompt = reauth ? "login" : consent === "basic" && existing ? "select_account" : "consent";
 
   try {
     const { state, nonce } = createOAuthState(sessionId, scopeList, {

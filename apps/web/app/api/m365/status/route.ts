@@ -67,6 +67,8 @@ export async function GET(request: Request) {
     missingCalendarConsent: flags.missingCalendarConsent,
     missingMailConsent: flags.missingMailConsent,
     capabilityErrors: probe.errors,
+    calendarNotReadyReason: probe.errors.calendar ?? null,
+    mailNotReadyReason: probe.errors.mail ?? null,
     capabilitiesCheckedAt: probe.checkedAt,
     configErrors: pub.configErrors,
     connectUrl: pub.connectUrl,

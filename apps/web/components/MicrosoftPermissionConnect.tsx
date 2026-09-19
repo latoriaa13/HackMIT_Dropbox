@@ -10,6 +10,7 @@ type Props = {
   label: string;
   variant?: "primary" | "secondary";
   className?: string;
+  reauth?: boolean;
 };
 
 export function MicrosoftPermissionConnect({
@@ -18,8 +19,9 @@ export function MicrosoftPermissionConnect({
   label,
   variant = "secondary",
   className = "",
+  reauth = false,
 }: Props) {
-  const href = microsoftConnectHref(consent, returnTo);
+  const href = microsoftConnectHref(consent, returnTo, reauth);
   const base =
     variant === "primary"
       ? "rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"

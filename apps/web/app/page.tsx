@@ -7,8 +7,10 @@ import type {
   CalendarAwareSchedule,
   Channel,
   FundraisingObjective,
+  OutlookBusyBlock,
   RiskPreference,
 } from "@tuesday/core";
+import { WeekPlannerGrid } from "@/components/WeekPlannerGrid";
 import { QueueCard } from "@/components/QueueCard";
 import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
 import { CalendarAwareScheduleView } from "@/components/CalendarAwareScheduleView";
@@ -62,6 +64,20 @@ export default function WeeklyPlanPage() {
   const [metaError, setMetaError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState<string>("");
   const [feedbackTotal, setFeedbackTotal] = useState(0);
+  const [outlookPreview, setOutlookPreview] = useState<OutlookBusyBlock[]>([]);
+
+  useEffect(() => {
+    if (!outlookConnected) {
+      setOutlookPreview([]);
+      return;
+    }
+    fetch(`/api/m365/calendar/week?weekStart=${weekStart}&sync=1`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.outlookEvents) setOutlookPreview(d.outlookEvents);
+      })
+      .catch(() => setOutlookPreview([]));
+  }, [outlookConnected, weekStart]);
 
   useEffect(() => {
     fetch("/api/meta")
@@ -414,6 +430,17 @@ export default function WeeklyPlanPage() {
               onScheduleUpdated={setSchedule}
               staffHours={staffHours}
             />
+          ) : outlookConnected ? (
+            <section className="space-y-4 rounded-xl border bg-white p-5">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+                Outlook this week
+              </h2>
+              <WeekPlannerGrid weekStart={weekStart} outlookEvents={outlookPreview} />
+              <p className="text-sm text-[var(--muted)]">
+                Click <strong>Build schedule</strong> to add proposed fundraising tasks in open slots (never
+                on busy Outlook blocks).
+              </p>
+            </section>
           ) : (
             <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-sm text-amber-950">
               Connect Outlook and click <strong>Build schedule</strong> to place recommended actions

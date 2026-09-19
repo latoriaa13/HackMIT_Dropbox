@@ -41,14 +41,62 @@ async function graphGet(url: string, token: string): Promise<Response> {
   });
 }
 
-function friendlyGraphError(status: number, scope: string): string {
+function friendlyGraphError(status: number, scope: string, detail?: string): string {
   if (status === 403) {
     return `${scope}: Microsoft Graph denied access (403). In Azure Portal → App registration → API permissions, add delegated ${scope} and grant admin consent, then use Connect calendar/mail again.`;
   }
   if (status === 401) {
-    return `${scope}: Session expired — disconnect and connect again.`;
+    const hint =
+      "Use Reconnect (all permissions) or Disconnect, then sign in again. Guest/external accounts (#EXT#) must use a mailbox that has Outlook (work/school M365 or @outlook.com).";
+    return detail
+      ? `${scope}: Microsoft rejected the access token (401). ${detail} ${hint}`
+      : `${scope}: Microsoft rejected the access token (401). ${hint}`;
   }
-  return `${scope}: Graph request failed (${status}).`;
+  return detail ? `${scope}: Graph request failed (${status}). ${detail}` : `${scope}: Graph request failed (${status}).`;
+}
+
+type GraphErrorBody = { error?: { code?: string; message?: string } };
+
+function explainGraphFailure(status: number, scope: string, body?: GraphErrorBody): string {
+  const code = body?.error?.code ?? "";
+  const msg = body?.error?.message ?? "";
+  if (code === "MailboxNotEnabledForRESTAPI" || msg.includes("MailboxNotEnabledForRESTAPI")) {
+    return `${scope}: This signed-in identity has no Outlook/Exchange mailbox. Tuesday cannot read calendar or mail for guest (#EXT#) or directory-only accounts. Sign in with @outlook.com or a work/school Microsoft 365 account that has Outlook.`;
+  }
+  if (code === "ResourceNotFound" && scope.includes("Calendar")) {
+    return `${scope}: No default calendar found for this account. Use a Microsoft account with an active Outlook calendar.`;
+  }
+  return friendlyGraphError(status, scope, msg || undefined);
+}
+
+async function graphGetAuthed(
+  sessionUserId: string,
+  scopeGroup: "user" | "calendar" | "mail",
+  url: string
+): Promise<{ ok: boolean; status: number; detail?: string; userMessage?: string }> {
+  let token = await getGraphAccessToken(sessionUserId, scopeGroup);
+  let res = await graphGet(url, token);
+  if (res.status === 401) {
+    invalidateCapabilityCache(sessionUserId);
+    token = await getGraphAccessToken(sessionUserId, scopeGroup, { forceRefresh: true });
+    res = await graphGet(url, token);
+  }
+  let body: GraphErrorBody | undefined;
+  if (!res.ok) {
+    try {
+      body = (await res.clone().json()) as GraphErrorBody;
+    } catch {
+      body = undefined;
+    }
+  }
+  const scopeLabel =
+    scopeGroup === "calendar" ? "Calendars.Read" : scopeGroup === "mail" ? "Mail.Read" : "User.Read";
+  return {
+    ok: res.ok,
+    status: res.status,
+    detail: body?.error?.message,
+    userMessage: res.ok ? undefined : explainGraphFailure(res.status, scopeLabel, body),
+  };
 }
 
 export async function probeGraphCapabilities(
@@ -82,26 +130,32 @@ export async function probeGraphCapabilities(
   }
 
   try {
-    const userToken = await getGraphAccessToken(sessionUserId, "user");
-    syncScopesFromToken(sessionUserId, userToken);
-    tokenScopes = scopesFromAccessToken(userToken);
-    const me = await graphGet("https://graph.microsoft.com/v1.0/me", userToken);
+    const me = await graphGetAuthed(sessionUserId, "user", "https://graph.microsoft.com/v1.0/me");
     profile = me.ok;
-    if (!me.ok) errors.profile = friendlyGraphError(me.status, "User.Read");
+    if (me.ok) {
+      const userToken = await getGraphAccessToken(sessionUserId, "user");
+      syncScopesFromToken(sessionUserId, userToken);
+      tokenScopes = scopesFromAccessToken(userToken);
+    } else {
+      errors.profile = me.userMessage ?? friendlyGraphError(me.status, "User.Read", me.detail);
+    }
   } catch (e) {
     errors.profile = isM365AuthError(e) ? e.message : "Could not verify Microsoft profile.";
   }
 
   try {
-    const calToken = await getGraphAccessToken(sessionUserId, "calendar");
-    syncScopesFromToken(sessionUserId, calToken);
-    tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(calToken));
     const start = new Date().toISOString();
     const end = new Date(Date.now() + 86_400_000).toISOString();
     const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$top=1`;
-    const res = await graphGet(url, calToken);
+    const res = await graphGetAuthed(sessionUserId, "calendar", url);
     calendar = res.ok;
-    if (!res.ok) errors.calendar = friendlyGraphError(res.status, "Calendars.Read");
+    if (res.ok) {
+      const calToken = await getGraphAccessToken(sessionUserId, "calendar");
+      syncScopesFromToken(sessionUserId, calToken);
+      tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(calToken));
+    } else {
+      errors.calendar = res.userMessage ?? friendlyGraphError(res.status, "Calendars.Read", res.detail);
+    }
   } catch (e) {
     errors.calendar = isM365AuthError(e)
       ? e.message
@@ -109,18 +163,24 @@ export async function probeGraphCapabilities(
   }
 
   try {
-    const mailToken = await getGraphAccessToken(sessionUserId, "mail");
-    syncScopesFromToken(sessionUserId, mailToken);
-    tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(mailToken));
-    const res = await graphGet("https://graph.microsoft.com/v1.0/me/messages?$top=1", mailToken);
+    const res = await graphGetAuthed(
+      sessionUserId,
+      "mail",
+      "https://graph.microsoft.com/v1.0/me/messages?$top=1"
+    );
     mail = res.ok;
-    if (!res.ok) errors.mail = friendlyGraphError(res.status, "Mail.Read");
-    const scopes = scopesFromAccessToken(mailToken);
-    mailSend = scopes.some((s) => s === "Mail.Send" || s.includes("Mail.Send"));
-    if (mail && !mailSend) {
-      errors.mail =
-        (errors.mail ? `${errors.mail} ` : "") +
-        "Mail.Send is not on your token — reconnect with mail permissions to send email.";
+    if (res.ok) {
+      const mailToken = await getGraphAccessToken(sessionUserId, "mail");
+      syncScopesFromToken(sessionUserId, mailToken);
+      tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(mailToken));
+      const scopes = scopesFromAccessToken(mailToken);
+      mailSend = scopes.some((s) => s === "Mail.Send" || s.includes("Mail.Send"));
+      if (!mailSend) {
+        errors.mail =
+          "Mail.Send is not on your token — reconnect with mail permissions to send email.";
+      }
+    } else {
+      errors.mail = res.userMessage ?? friendlyGraphError(res.status, "Mail.Read", res.detail);
     }
   } catch (e) {
     errors.mail = isM365AuthError(e) ? e.message : "Mail access failed — connect mail permissions.";

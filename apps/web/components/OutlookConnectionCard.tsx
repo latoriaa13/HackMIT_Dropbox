@@ -70,23 +70,46 @@ export function OutlookConnectionCard({
   }, [onConnectionChange]);
 
   useEffect(() => {
-    load();
-    const p = new URLSearchParams(window.location.search);
-    for (const key of ["connected", "calendar_connected", "mail_connected", "error"] as const) {
-      const val = p.get(key);
-      if (key === "error" && val && consumeMicrosoftOAuthReturn()) {
-        setBanner({ type: "err", text: formatOAuthReturnMessage(val) });
-        window.history.replaceState({}, "", "/");
-        break;
+    void (async () => {
+      await load();
+      const p = new URLSearchParams(window.location.search);
+      for (const key of ["connected", "calendar_connected", "mail_connected", "error"] as const) {
+        const val = p.get(key);
+        if (!val && key !== "error") continue;
+        if (key === "error" && val && consumeMicrosoftOAuthReturn()) {
+          setBanner({ type: "err", text: formatOAuthReturnMessage(val) });
+          window.history.replaceState({}, "", "/");
+          break;
+        }
+        if (key !== "error" && val && consumeMicrosoftOAuthReturn()) {
+          window.history.replaceState({}, "", "/");
+          const st = await fetch("/api/m365/status?verify=1").then((r) => r.json());
+          setStatus(st);
+          onConnectionChange?.(st.outlookReady === true);
+          const verified =
+            key === "calendar_connected"
+              ? st.outlookReady
+              : key === "mail_connected"
+                ? st.mailAutopilotReady
+                : st.outlookReady || st.mailAutopilotReady;
+          if (verified) {
+            setBanner({ type: "ok", text: formatOAuthReturnMessage(key) });
+          } else {
+            setBanner({
+              type: "err",
+              text:
+                key === "calendar_connected"
+                  ? "Sign-in finished, but Outlook calendar is not verified yet. Use Connect calendar or Reconnect (all permissions)."
+                  : key === "mail_connected"
+                    ? "Sign-in finished, but mail is not verified yet. Use Connect mail on Autopilot or Reconnect."
+                    : "Sign-in finished, but Graph permissions are not verified yet. Reconnect below.",
+            });
+          }
+          break;
+        }
       }
-      if (key !== "error" && val && consumeMicrosoftOAuthReturn()) {
-        setBanner({ type: "ok", text: formatOAuthReturnMessage(key) });
-        window.history.replaceState({}, "", "/");
-        load(true);
-        break;
-      }
-    }
-  }, [load]);
+    })();
+  }, [load, onConnectionChange]);
 
   const refreshCalendar = async () => {
     if (!status?.outlookReady) {
@@ -168,11 +191,20 @@ export function OutlookConnectionCard({
         )}
         <div className="mt-4 flex flex-wrap gap-2">
           <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" variant="primary" />
-          <MicrosoftPermissionConnect consent="full" returnTo="/" label="Reconnect (all permissions)" />
+          <MicrosoftPermissionConnect
+            consent="full"
+            returnTo="/"
+            label="Reconnect (all permissions)"
+            reauth
+          />
           <button type="button" onClick={disconnect} className="rounded-lg border bg-white px-3 py-2 text-sm">
             Disconnect
           </button>
         </div>
+        <p className="mt-3 text-xs text-amber-900">
+          Tip: If your email shows <code className="font-mono">#EXT#</code>, you are a guest in a tenant — use an
+          account with a real Outlook mailbox (@outlook.com or work/school M365).
+        </p>
         {permissionError && (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
             <p className="font-medium">{permissionError.title}</p>

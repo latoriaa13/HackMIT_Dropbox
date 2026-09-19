@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { CalendarAwareSchedule, SchedulableFundraisingTask } from "@tuesday/core";
 import { formatCurrency } from "@/lib/format";
 import Link from "next/link";
+import { WeekPlannerGrid } from "@/components/WeekPlannerGrid";
 
 type ViewMode = "queue" | "schedule" | "split";
 
@@ -38,10 +39,6 @@ export function CalendarAwareScheduleView({
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [altTaskId, setAltTaskId] = useState<string | null>(null);
   const [alternatives, setAlternatives] = useState<Array<{ start: string; end: string }>>([]);
-
-  const timeline = [...schedule.timeline].sort(
-    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
-  );
 
   const act = async (path: string, method = "POST", body?: unknown) => {
     const res = await fetch(path, {
@@ -113,28 +110,11 @@ export function CalendarAwareScheduleView({
       </div>
 
       {(viewMode === "schedule" || viewMode === "split") && (
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold uppercase text-[var(--muted)]">Weekly schedule</h3>
-          {timeline.map((entry) => {
-            const cls =
-              entry.kind === "outlook_event"
-                ? "border-blue-200 bg-blue-50"
-                : entry.kind === "free_block"
-                  ? "border-stone-100 bg-stone-50/80"
-                  : entry.kind === "buffer"
-                    ? "border-stone-200 bg-stone-100"
-                    : entry.conflict
-                      ? "border-red-400 bg-red-50"
-                      : "border-orange-200 bg-orange-50";
-            return (
-              <div key={entry.id} className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>
-                <p className="font-medium">
-                  {formatRange(entry.start, entry.end)} · {entry.label}
-                </p>
-                {entry.detail && <p className="mt-1 text-[var(--muted)]">{entry.detail}</p>}
-              </div>
-            );
-          })}
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase text-[var(--muted)]">
+            Your week — Outlook busy time + proposed tasks
+          </h3>
+          <WeekPlannerGrid schedule={schedule} weekStart={schedule.weekStart} />
         </section>
       )}
 
