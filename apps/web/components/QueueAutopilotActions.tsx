@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { QueueItem } from "@tuesday/core";
+import { markMicrosoftOAuthAttempt } from "@/lib/oauth-errors";
 
 type M365Session = {
   connected: boolean;
-  oauthConfigured?: boolean;
+  canStartOAuth?: boolean;
   configurationError?: boolean;
   missingCalendarConsent?: boolean;
   missingMailConsent?: boolean;
@@ -88,10 +89,10 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
     }
   };
 
-  if (m365 && !m365.oauthConfigured) {
+  if (m365?.configurationError) {
     return (
       <div className="mt-3 border-t pt-3 text-xs text-amber-900">
-        Microsoft Entra is not configured on this server. Autopilot actions are unavailable.
+        Microsoft Entra is not configured on this server. Set MICROSOFT_CLIENT_ID in `.env.local`.
       </div>
     );
   }
@@ -103,6 +104,7 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
         <p className="mt-1 text-xs text-amber-900">Microsoft 365 connection required.</p>
         <a
           href={m365.connectUrl ?? "/api/auth/microsoft/connect"}
+          onClick={() => markMicrosoftOAuthAttempt()}
           className="mt-2 inline-block rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white"
         >
           Connect Microsoft 365

@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createOAuthState,
   getAuthCodeUrl,
-  isM365Configured,
-  getOAuthConfigErrors,
+  canStartMicrosoftOAuth,
   scopesForConsent,
   type ConsentKind,
 } from "@tuesday/m365";
@@ -19,13 +18,8 @@ function appBase(request: Request) {
 
 export async function GET(request: Request) {
   const base = appBase(request);
-  if (!isM365Configured()) {
+  if (!canStartMicrosoftOAuth()) {
     return NextResponse.redirect(`${base}/autopilot?error=not_configured`);
-  }
-  const configErrors = getOAuthConfigErrors();
-  if (configErrors.length) {
-    const msg = encodeURIComponent(configErrors.join("; "));
-    return NextResponse.redirect(`${base}/autopilot?error=${msg}`);
   }
 
   const req = request as import("next/server").NextRequest;

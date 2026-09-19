@@ -33,8 +33,16 @@ export async function GET(request: Request) {
   }
 
   if (error) {
-    const reason =
-      error === "access_denied" ? "oauth_cancelled" : encodeURIComponent(errorDesc ?? error);
+    const desc = errorDesc ?? error;
+    let reason = "oauth_token_exchange_failed";
+    if (error === "access_denied") reason = "oauth_cancelled";
+    else if (desc.includes("invalid_client") || desc.includes("AADSTS7000215")) {
+      reason = "oauth_invalid_client";
+    } else if (error !== "invalid_client") {
+      reason = encodeURIComponent(desc);
+    } else {
+      reason = "oauth_invalid_client";
+    }
     return redirectWithSession(`/autopilot?error=${reason}`);
   }
 
@@ -73,7 +81,11 @@ export async function GET(request: Request) {
     });
     return redirectWithSession("/autopilot?connected=1", sessionId);
   } catch (e) {
-    const msg = encodeURIComponent(e instanceof Error ? e.message : "callback_failed");
-    return redirectWithSession(`/autopilot?error=${msg}`, sessionId);
+    const raw = e instanceof Error ? e.message : "callback_failed";
+    const reason =
+      raw.includes("invalid_client") || raw.includes("AADSTS7000215")
+        ? "oauth_invalid_client"
+        : "oauth_token_exchange_failed";
+    return redirectWithSession(`/autopilot?error=${reason}`, sessionId);
   }
 }

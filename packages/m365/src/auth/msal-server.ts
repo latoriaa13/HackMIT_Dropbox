@@ -6,15 +6,18 @@ import { getM365Env, isM365Configured } from "../config/env";
 import { scopesForConsent, type ConsentKind } from "./scopes";
 import { readMsalCacheSerialized, writeMsalCacheSerialized } from "./msal-cache-store";
 
-export function createMsalClient(): Cca {
+export function createMsalClient(options?: { requireSecret?: boolean }): Cca {
   const env = getM365Env();
-  if (!env.clientId || !env.clientSecret) {
+  if (!env.clientId) {
+    throw new Error("Microsoft 365 OAuth is not configured");
+  }
+  if (options?.requireSecret !== false && !env.clientSecret) {
     throw new Error("Microsoft 365 OAuth is not configured");
   }
   return new ConfidentialClientApplication({
     auth: {
       clientId: env.clientId,
-      clientSecret: env.clientSecret,
+      clientSecret: env.clientSecret ?? "",
       authority: `https://login.microsoftonline.com/${env.tenantId}`,
     },
   });
@@ -37,7 +40,7 @@ export async function getAuthCodeUrl(input: {
   nonce: string;
   consent?: ConsentKind;
 }): Promise<string> {
-  const client = createMsalClient();
+  const client = createMsalClient({ requireSecret: false });
   const env = getM365Env();
   const scopes = scopesForConsent(input.consent ?? "full");
   return client.getAuthCodeUrl({

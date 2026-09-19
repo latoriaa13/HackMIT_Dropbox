@@ -16,6 +16,7 @@ export async function GET() {
       configured: pub.oauthConfigured,
       message: pub.message,
       oauthConfigured: pub.oauthConfigured,
+      canStartOAuth: pub.canStartOAuth,
       provider: pub.provider,
       configurationError: pub.configurationError,
       configErrors: pub.configErrors,
@@ -30,6 +31,7 @@ export async function GET() {
   return NextResponse.json({
     ...status,
     oauthConfigured: pub.oauthConfigured,
+    canStartOAuth: pub.canStartOAuth,
     provider: pub.provider,
     displayName: pub.displayName ?? status.accountName,
     email: pub.email ?? status.accountEmail,

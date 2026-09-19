@@ -20,6 +20,11 @@ export function isM365Configured(): boolean {
   return !!(e.clientId && e.clientSecret);
 }
 
+/** Enough to redirect the user to Microsoft sign-in (secret validated on callback). */
+export function canStartMicrosoftOAuth(): boolean {
+  return !!getM365Env().clientId;
+}
+
 export function getOAuthConfigErrors(): string[] {
   const errors: string[] = [];
   const e = getM365Env();

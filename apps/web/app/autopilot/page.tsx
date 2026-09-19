@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  consumeMicrosoftOAuthReturn,
+  formatAutopilotOAuthError,
+  markMicrosoftOAuthAttempt,
+} from "@/lib/oauth-errors";
 
 type Status = {
   connected: boolean;
   mode: string;
   provider?: "microsoft-graph";
   configurationError?: boolean;
+  canStartOAuth?: boolean;
   connectUrl?: string;
   accountEmail: string | null;
   accountName: string | null;
@@ -20,13 +26,6 @@ type Status = {
   missingMailConsent?: boolean;
   configErrors?: string[];
   message?: string;
-};
-
-const ERROR_HINTS: Record<string, string> = {
-  not_configured: "Add MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET to .env.local (see .env.example).",
-  oauth_cancelled: "Microsoft sign-in was cancelled.",
-  oauth_denied: "Microsoft denied the sign-in request.",
-  invalid_oauth_state: "OAuth state expired or was invalid — try Connect again.",
 };
 
 type PendingDraft = {
@@ -64,10 +63,16 @@ export default function AutopilotPage() {
   useEffect(() => {
     refresh();
     const p = new URLSearchParams(window.location.search);
-    if (p.get("connected")) setMsg("Microsoft 365 connected — approve drafts to send through Microsoft Graph.");
-    if (p.get("error")) {
-      const code = p.get("error")!;
-      setMsg(ERROR_HINTS[code] ?? decodeURIComponent(code));
+    const connected = p.get("connected");
+    const error = p.get("error");
+    if (connected) {
+      setMsg("Microsoft 365 connected — approve drafts to send through Microsoft Graph.");
+      window.history.replaceState({}, "", "/autopilot");
+    } else if (error && consumeMicrosoftOAuthReturn()) {
+      setMsg(formatAutopilotOAuthError(error));
+      window.history.replaceState({}, "", "/autopilot");
+    } else if (error) {
+      window.history.replaceState({}, "", "/autopilot");
     }
   }, [refresh]);
 
@@ -147,20 +152,16 @@ export default function AutopilotPage() {
             )}
             {status.tenantId && <p className="text-xs text-[var(--muted)]">Tenant: {status.tenantId}</p>}
             {status.message && <p className="text-amber-800">{status.message}</p>}
-            {status.configErrors?.map((e) => (
-              <p key={e} className="text-red-700">
-                {e}
-              </p>
-            ))}
-            {(status.configurationError || !status.oauthConfigured) && (
+            {status.configurationError && (
               <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-900">
-                Microsoft Entra configuration is missing. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and
-                SESSION_SECRET in `.env.local`.
+                Microsoft Entra configuration is missing. Set MICROSOFT_CLIENT_ID in `.env.local` (see
+                `.env.example`).
               </p>
             )}
-            {status.oauthConfigured && !status.connected && (
+            {!status.configurationError && !status.connected && (
               <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                Microsoft 365 connection required — connect to draft email, find meeting times, and run automation tasks.
+                Microsoft 365 connection required — connect to draft email, find meeting times, and run automation
+                tasks.
               </p>
             )}
             {status.connected && (
@@ -172,9 +173,10 @@ export default function AutopilotPage() {
               <p className="text-xs text-[var(--muted)]">Granted: {status.grantedScopes.join(", ")}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-2">
-              {status.oauthConfigured && !status.connected && (
+              {!status.connected && status.canStartOAuth !== false && (
                 <a
                   href={status.connectUrl ?? "/api/auth/microsoft/connect"}
+                  onClick={() => markMicrosoftOAuthAttempt()}
                   className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
                 >
                   Connect Microsoft 365
@@ -196,7 +198,7 @@ export default function AutopilotPage() {
                   Request mail access
                 </a>
               )}
-              {(status.connected || status.oauthConfigured) && (
+              {status.connected && (
                 <button
                   type="button"
                   className="rounded-lg border px-4 py-2 text-sm"
