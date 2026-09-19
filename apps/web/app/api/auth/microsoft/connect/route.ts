@@ -6,6 +6,8 @@ import {
   scopesForIncrementalConsent,
   getMicrosoftAccount,
   type ConsentKind,
+  authoritySegmentForAccountKind,
+  parseAccountKindParam,
 } from "@tuesday/m365";
 import {
   attachSessionCookie,
@@ -42,18 +44,35 @@ export async function GET(request: Request) {
   const existing = getMicrosoftAccount(sessionId);
   const scopeList = scopesForIncrementalConsent(consent, existing?.grantedScopes);
   const reauth = url.searchParams.get("reauth") === "1";
-  const prompt = reauth ? "login" : consent === "basic" && existing ? "select_account" : "consent";
+  const pickAccount = url.searchParams.get("pickAccount") === "1";
+  const accountKind = parseAccountKindParam(url.searchParams.get("accountKind"));
+  const authAuthoritySegment = authoritySegmentForAccountKind(accountKind);
+  let prompt: "consent" | "select_account" | "login";
+  if (reauth) {
+    prompt = "login";
+  } else if (!existing || pickAccount) {
+    // Avoid silently reusing a cached Microsoft session (e.g. #EXT# guest) when the user expects to pick an account.
+    prompt = "select_account";
+  } else if (consent === "calendar" || consent === "mail") {
+    prompt = "consent";
+  } else if (consent === "basic") {
+    prompt = "select_account";
+  } else {
+    prompt = "consent";
+  }
 
   try {
     const { state, nonce } = createOAuthState(sessionId, scopeList, {
       consentKind: consent,
       returnTo,
+      authAuthoritySegment,
     });
     const authorizeUrl = await getAuthCodeUrl({
       state,
       nonce,
       scopes: scopeList,
       prompt,
+      authoritySegment: authAuthoritySegment,
     });
     const res = NextResponse.redirect(authorizeUrl);
     attachSessionCookie(res, sessionId, req);

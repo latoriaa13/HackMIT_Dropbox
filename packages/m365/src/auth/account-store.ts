@@ -6,6 +6,8 @@ export type MicrosoftAccountLink = {
   displayName: string;
   email: string;
   tenantId: string;
+  /** login.microsoftonline.com tenant segment used at sign-in (e.g. consumers, organizations, common). */
+  authAuthoritySegment?: string;
   grantedScopes: string[];
   connectedAt: string;
 };

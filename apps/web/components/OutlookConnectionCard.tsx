@@ -4,9 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { consumeMicrosoftOAuthReturn, formatOAuthReturnMessage } from "@/lib/oauth-errors";
 import { formatM365UserError } from "@/lib/m365-user-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
+import {
+  gmailInOutlookVsGraphMessage,
+  guestExternalAccountMessage,
+  isGuestExternalMicrosoftAccount,
+} from "@/lib/microsoft-account-hints";
 
 type M365Status = {
   accountLinked?: boolean;
+  isGuestExternalAccount?: boolean;
   connected?: boolean;
   outlookReady?: boolean;
   mailAutopilotReady?: boolean;
@@ -140,6 +146,8 @@ export function OutlookConnectionCard({
   };
 
   const email = status?.email ?? status?.accountEmail;
+  const isGuestExternal =
+    status?.isGuestExternalAccount === true || isGuestExternalMicrosoftAccount(email ?? undefined);
 
   if (!status) return null;
 
@@ -148,14 +156,30 @@ export function OutlookConnectionCard({
       <div className="rounded-xl border border-blue-200 bg-blue-50/80 p-5">
         <h2 className="text-lg font-semibold text-blue-950">Connect to Outlook</h2>
         <p className="mt-2 max-w-xl text-sm text-blue-900">
-          Sign in with Microsoft and approve <strong>Calendars.Read</strong> so Tuesday can read availability and
-          plan around real meetings.
+          Use the same kind of sign-in as{" "}
+          <a href="https://outlook.live.com/mail/" className="font-medium underline" target="_blank" rel="noreferrer">
+            outlook.com
+          </a>
+          . Approve <strong>Calendars.Read</strong> so Tuesday can read availability. Not sure which type you use? Try
+          personal first (most outlook.com / Gmail-via-Microsoft logins).
         </p>
         {status.configurationError ? (
           <p className="mt-3 text-sm text-red-800">Microsoft Entra is not configured on this server.</p>
         ) : (
           <div className="mt-4 flex flex-wrap gap-2">
-            <MicrosoftPermissionConnect consent="full" returnTo="/" label="Connect to Outlook" variant="primary" />
+            <MicrosoftPermissionConnect
+              consent="full"
+              returnTo="/"
+              label="Connect — personal (outlook.com)"
+              variant="primary"
+              accountKind="personal"
+            />
+            <MicrosoftPermissionConnect
+              consent="full"
+              returnTo="/"
+              label="Connect — work or school"
+              accountKind="work"
+            />
           </div>
         )}
         {banner && (
@@ -177,29 +201,70 @@ export function OutlookConnectionCard({
         )}
         <h2 className="text-lg font-semibold text-amber-950">Microsoft signed in — calendar not verified</h2>
         <p className="mt-2 text-sm text-amber-900">{email}</p>
+        {isGuestExternal && (
+          <div className="mt-3 space-y-2 rounded-lg border border-red-300 bg-red-50 px-3 py-3 text-sm text-red-950">
+            <p className="font-medium">{guestExternalAccountMessage()}</p>
+            <p>{gmailInOutlookVsGraphMessage()}</p>
+          </div>
+        )}
         <p className="mt-2 max-w-xl text-sm text-amber-900">
           {status.message ??
             "We could not read your Outlook calendar yet. Connect calendar permissions (same flow as mail on Autopilot)."}
         </p>
-        {status.capabilityErrors?.calendar && (
-          <p className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-            {status.capabilityErrors.calendar}
-          </p>
-        )}
-        {status.capabilityErrors?.mail && (
-          <p className="mt-2 text-xs text-amber-800">{status.capabilityErrors.mail}</p>
-        )}
+        {(() => {
+          const cal = status.capabilityErrors?.calendar;
+          const mail = status.capabilityErrors?.mail;
+          const same = cal && mail && cal === mail;
+          if (same) {
+            return (
+              <p className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{cal}</p>
+            );
+          }
+          return (
+            <>
+              {cal && (
+                <p className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{cal}</p>
+              )}
+              {mail && mail !== cal && <p className="mt-2 text-xs text-amber-800">{mail}</p>}
+            </>
+          );
+        })()}
         <div className="mt-4 flex flex-wrap gap-2">
-          <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" variant="primary" />
-          <MicrosoftPermissionConnect
-            consent="full"
-            returnTo="/"
-            label="Reconnect (all permissions)"
-            reauth
-          />
-          <button type="button" onClick={disconnect} className="rounded-lg border bg-white px-3 py-2 text-sm">
-            Disconnect
-          </button>
+          {isGuestExternal ? (
+            <>
+              <MicrosoftPermissionConnect
+                consent="full"
+                returnTo="/"
+                label="Try personal sign-in (outlook.com)"
+                variant="primary"
+                reauth
+                accountKind="personal"
+              />
+              <MicrosoftPermissionConnect
+                consent="full"
+                returnTo="/"
+                label="Work or school sign-in"
+                reauth
+                accountKind="work"
+              />
+              <button type="button" onClick={disconnect} className="rounded-lg border bg-white px-3 py-2 text-sm">
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <>
+              <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" variant="primary" />
+              <MicrosoftPermissionConnect
+                consent="full"
+                returnTo="/"
+                label="Reconnect (all permissions)"
+                reauth
+              />
+              <button type="button" onClick={disconnect} className="rounded-lg border bg-white px-3 py-2 text-sm">
+                Disconnect
+              </button>
+            </>
+          )}
         </div>
         <p className="mt-3 text-xs text-amber-900">
           Tip: If your email shows <code className="font-mono">#EXT#</code>, you are a guest in a tenant — use an

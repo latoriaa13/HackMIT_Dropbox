@@ -37,7 +37,8 @@ async function acquireForAccount(
   if (!link) {
     throw new M365AuthError("Microsoft 365 is not connected.", "reauth_required");
   }
-  const client = createMsalClient();
+  const authoritySegment = link.authAuthoritySegment?.trim() || undefined;
+  const client = createMsalClient({ authoritySegment });
   await loadMsalCacheIntoClient(client, sessionUserId);
   const cache = client.getTokenCache();
   const accounts = await cache.getAllAccounts();

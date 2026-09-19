@@ -70,7 +70,12 @@ export async function GET(request: Request) {
 
   try {
     const scopes = pending.scopes.length ? pending.scopes : scopesForConsent("full");
-    const result = await exchangeCodeAndPersist(sessionId, code, scopes);
+    const result = await exchangeCodeAndPersist(
+      sessionId,
+      code,
+      scopes,
+      pending.authAuthoritySegment
+    );
     const profile = await fetchMicrosoftProfile(result.accessToken);
     const account = result.account;
     const prior = getMicrosoftAccount(sessionId);
@@ -81,6 +86,7 @@ export async function GET(request: Request) {
       displayName: profile.displayName,
       email: profile.email || account?.username || "",
       tenantId: account?.tenantId ?? "common",
+      authAuthoritySegment: pending.authAuthoritySegment ?? prior?.authAuthoritySegment,
       grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken.length ? fromToken : []),
       connectedAt: prior?.connectedAt ?? new Date().toISOString(),
     });

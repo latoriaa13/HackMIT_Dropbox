@@ -4,6 +4,7 @@ export * from "./provider/factory";
 export * from "./provider/graph-provider";
 export * from "./config/env";
 export * from "./auth/scopes";
+export * from "./auth/authority";
 export * from "./auth/msal-server";
 export * from "./auth/oauth-state-store";
 export * from "./auth/account-store";

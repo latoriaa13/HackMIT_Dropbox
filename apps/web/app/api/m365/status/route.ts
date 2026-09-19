@@ -39,9 +39,13 @@ export async function GET(request: Request) {
   const probe = await probeGraphCapabilities(sessionUserId, { force: forceProbe });
   const flags = connectionFlagsFromProbe(probe, true);
 
+  const email = pub.email ?? "";
+  const isGuestExternal = email.includes("#EXT#") || email.includes("#ext#");
+
   return NextResponse.json({
     connected: flags.outlookReady,
     accountLinked: true,
+    isGuestExternalAccount: isGuestExternal,
     outlookReady: flags.outlookReady,
     mailAutopilotReady: flags.mailAutopilotReady,
     profileReady: flags.profileReady,
@@ -67,6 +71,8 @@ export async function GET(request: Request) {
     missingCalendarConsent: flags.missingCalendarConsent,
     missingMailConsent: flags.missingMailConsent,
     capabilityErrors: probe.errors,
+    graphErrorCodes: probe.graphErrorCodes ?? null,
+    microsoftIdentity: probe.identity ?? null,
     calendarNotReadyReason: probe.errors.calendar ?? null,
     mailNotReadyReason: probe.errors.mail ?? null,
     capabilitiesCheckedAt: probe.checkedAt,
