@@ -22,3 +22,8 @@ export * from "./journey/donor-journey";
 export * from "./explanations/detailed-explanation";
 export * from "./privacy/gift-privacy";
 export * from "./schedule/weekly-calendar";
+export * from "./config/scheduling-config";
+export * from "./scheduling/types";
+export * from "./scheduling/planner";
+export * from "./scheduling/tasks-from-queue";
+export * from "./scheduling/week-utils";

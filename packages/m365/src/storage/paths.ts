@@ -32,3 +32,11 @@ export function microsoftAccountsPath(): string {
 export function msalCachePath(): string {
   return path.join(automationDataDir(), "msal-encrypted-cache.json");
 }
+
+export function calendarCachePath(): string {
+  return path.join(automationDataDir(), "calendar-cache.json");
+}
+
+export function scheduleStorePath(): string {
+  return path.join(automationDataDir(), "tuesday-schedules.json");
+}

@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BuildTuesdayInput,
   BuildTuesdayResult,
+  CalendarAwareSchedule,
   Channel,
   FundraisingObjective,
   RiskPreference,
-  WeeklyCalendar,
 } from "@tuesday/core";
 import { QueueCard } from "@/components/QueueCard";
-import { WeeklyCalendarView } from "@/components/WeeklyCalendarView";
+import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
+import { CalendarAwareScheduleView } from "@/components/CalendarAwareScheduleView";
 import { formatCurrency } from "@/lib/format";
 import { applyFeedbackDeprioritize, feedbackCount } from "@/lib/feedback";
 
@@ -24,6 +25,16 @@ const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
 
 const HOUR_OPTIONS = [4, 8, 16];
 
+function mondayIso(d = new Date()) {
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const m = new Date(d);
+  m.setDate(m.getDate() + diff);
+  return m.toISOString().slice(0, 10);
+}
+
+type ViewMode = "queue" | "schedule" | "split";
+
 export default function WeeklyPlanPage() {
   const [objective, setObjective] = useState<FundraisingObjective>("protect_renewals");
   const [staffHours, setStaffHours] = useState(8);
@@ -34,13 +45,21 @@ export default function WeeklyPlanPage() {
     "event_invitation",
     "stewardship_message",
   ]);
+  const [weekStart, setWeekStart] = useState(mondayIso());
+  const [workingHoursStart, setWorkingHoursStart] = useState(9);
+  const [workingHoursEnd, setWorkingHoursEnd] = useState(17);
+  const [lunchStartHour, setLunchStartHour] = useState(12);
+  const [lunchEndHour, setLunchEndHour] = useState(13);
+  const [bufferMinutes, setBufferMinutes] = useState(15);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BuildTuesdayResult | null>(null);
+  const [schedule, setSchedule] = useState<CalendarAwareSchedule | null>(null);
+  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [metaError, setMetaError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState<string>("");
   const [feedbackTotal, setFeedbackTotal] = useState(0);
-  const [showList, setShowList] = useState(false);
 
   useEffect(() => {
     fetch("/api/meta")
@@ -52,35 +71,75 @@ export default function WeeklyPlanPage() {
       .catch(() => setMetaError("Could not reach API"));
   }, []);
 
-  const build = useCallback(async () => {
-    if (channels.length === 0) return;
-    const payload: BuildTuesdayInput = {
+  const buildPayload = useCallback(
+    (): BuildTuesdayInput => ({
       objective,
       staffHours,
       channels,
       riskPreference,
-    };
+    }),
+    [objective, staffHours, channels, riskPreference]
+  );
+
+  const build = useCallback(async () => {
+    if (channels.length === 0) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/tuesday/build", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Build failed");
-      setResult({
-        ...data,
-        items: applyFeedbackDeprioritize(data.items),
-      });
+      if (outlookConnected) {
+        const res = await fetch("/api/tuesday/schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...buildPayload(),
+            weekStart,
+            preferences: {
+              workingHoursStart,
+              workingHoursEnd,
+              lunchStartHour,
+              lunchEndHour,
+              bufferBetweenTasksMinutes: bufferMinutes,
+            },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message ?? data.error ?? "Schedule build failed");
+        setSchedule(data.schedule);
+        setResult({
+          ...data.queueResult,
+          items: applyFeedbackDeprioritize(data.queueResult.items),
+        });
+      } else {
+        const res = await fetch("/api/tuesday/build", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Build failed");
+        setSchedule(null);
+        setResult({
+          ...data,
+          items: applyFeedbackDeprioritize(data.items),
+        });
+      }
       setFeedbackTotal(feedbackCount());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Build failed");
     } finally {
       setLoading(false);
     }
-  }, [objective, staffHours, channels, riskPreference]);
+  }, [
+    channels,
+    outlookConnected,
+    buildPayload,
+    weekStart,
+    workingHoursStart,
+    workingHoursEnd,
+    lunchStartHour,
+    lunchEndHour,
+    bufferMinutes,
+  ]);
 
   const initialBuild = useRef(false);
   useEffect(() => {
@@ -99,12 +158,7 @@ export default function WeeklyPlanPage() {
     const res = await fetch("/api/export/queue", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        objective,
-        staffHours,
-        channels,
-        riskPreference,
-      }),
+      body: JSON.stringify(buildPayload()),
     });
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -115,17 +169,27 @@ export default function WeeklyPlanPage() {
     URL.revokeObjectURL(url);
   };
 
+  const exportSchedule = () => {
+    if (!schedule) return;
+    const blob = new Blob([JSON.stringify(schedule, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tuesday-schedule-${schedule.weekStart}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-8">
+      <OutlookConnectionCard onConnectionChange={setOutlookConnected} />
+
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight">Build my Tuesday</h1>
         <p className="mt-2 max-w-2xl text-[var(--muted)]">
-          {schoolName
-            ? `${schoolName} — `
-            : ""}
-          Builds a <strong>Mon–Fri calendar</strong> with timed steps—prep, outreach, and CRM
-          wrap-up—spread across your weekly hour budget. Estimates are planning scenarios, not
-          guaranteed revenue.
+          {schoolName ? `${schoolName} — ` : ""}
+          Prioritize fundraising work against your real Outlook availability when connected. Planning
+          stays local until you approve tasks; Outlook changes only after Autopilot confirmation.
         </p>
         {metaError && (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -187,6 +251,73 @@ export default function WeeklyPlanPage() {
           </div>
         </div>
 
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-sm">
+            Planning week (Monday)
+            <input
+              type="date"
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={weekStart}
+              onChange={(e) => setWeekStart(e.target.value)}
+            />
+          </label>
+          <label className="text-sm">
+            Work day start (hour)
+            <input
+              type="number"
+              min={6}
+              max={12}
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={workingHoursStart}
+              onChange={(e) => setWorkingHoursStart(Number(e.target.value))}
+            />
+          </label>
+          <label className="text-sm">
+            Work day end (hour)
+            <input
+              type="number"
+              min={13}
+              max={21}
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={workingHoursEnd}
+              onChange={(e) => setWorkingHoursEnd(Number(e.target.value))}
+            />
+          </label>
+          <label className="text-sm">
+            Buffer between tasks (min)
+            <input
+              type="number"
+              min={0}
+              max={60}
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={bufferMinutes}
+              onChange={(e) => setBufferMinutes(Number(e.target.value))}
+            />
+          </label>
+          <label className="text-sm">
+            Lunch start (hour)
+            <input
+              type="number"
+              min={11}
+              max={14}
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={lunchStartHour}
+              onChange={(e) => setLunchStartHour(Number(e.target.value))}
+            />
+          </label>
+          <label className="text-sm">
+            Lunch end (hour)
+            <input
+              type="number"
+              min={12}
+              max={15}
+              className="mt-1 w-full rounded-lg border px-2 py-1"
+              value={lunchEndHour}
+              onChange={(e) => setLunchEndHour(Number(e.target.value))}
+            />
+          </label>
+        </div>
+
         <fieldset className="mt-6">
           <legend className="text-sm font-medium">Preferred channels</legend>
           <div className="mt-2 flex flex-wrap gap-3 text-sm">
@@ -217,7 +348,7 @@ export default function WeeklyPlanPage() {
             disabled={loading || channels.length === 0}
             className="rounded-xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow disabled:opacity-50"
           >
-            {loading ? "Building…" : "Build my Tuesday"}
+            {loading ? "Building…" : outlookConnected ? "Build schedule" : "Build my Tuesday"}
           </button>
           {result && (
             <button
@@ -225,16 +356,16 @@ export default function WeeklyPlanPage() {
               onClick={exportCsv}
               className="rounded-xl border border-[var(--border)] bg-white px-6 py-3 text-sm font-medium"
             >
-              Export calendar CSV
+              Export queue CSV
             </button>
           )}
-          {result && (
+          {schedule && (
             <button
               type="button"
-              onClick={() => setShowList((v) => !v)}
+              onClick={exportSchedule}
               className="rounded-xl border border-[var(--border)] bg-white px-6 py-3 text-sm font-medium"
             >
-              {showList ? "Hide list view" : "Show list view"}
+              Export schedule
             </button>
           )}
         </div>
@@ -247,33 +378,43 @@ export default function WeeklyPlanPage() {
       {result && (
         <section className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
-            <Stat
-              label="Conservative opportunity"
-              value={formatCurrency(result.totals.conservative)}
-            />
+            <Stat label="Conservative opportunity" value={formatCurrency(result.totals.conservative)} />
             <Stat label="Expected opportunity" value={formatCurrency(result.totals.expected)} />
             <Stat label="Upside opportunity" value={formatCurrency(result.totals.upside)} />
           </div>
           <p className="text-sm text-[var(--muted)]">
-            {result.items.length} actions · {result.minutesUsed} / {result.minutesBudget} minutes
-            · {result.candidateCount} candidates scored
+            {result.items.length} actions · {result.minutesUsed} / {result.minutesBudget} minutes ·{" "}
+            {result.candidateCount} candidates scored
             {feedbackTotal > 0 && ` · ${feedbackTotal} feedback note(s) in this browser`}
           </p>
-          {result.calendar?.days?.length ? (
-            <WeeklyCalendarView calendar={result.calendar as WeeklyCalendar} />
+
+          {schedule && outlookConnected ? (
+            <CalendarAwareScheduleView
+              schedule={schedule}
+              queueItems={result.items}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              onScheduleUpdated={setSchedule}
+              staffHours={staffHours}
+            />
           ) : (
-            <p className="text-sm text-[var(--muted)]">No calendar steps generated.</p>
+            <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-sm text-amber-950">
+              Connect Outlook and click <strong>Build schedule</strong> to place recommended actions
+              around your live calendar. Queue priorities below still reflect the fundraising engine.
+            </div>
           )}
-          {showList && (
+
+          {(!schedule || viewMode === "queue") && (
             <div className="space-y-4 border-t pt-6">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Priority list (same actions)
+                Priority queue
               </h2>
               {result.items.map((item, i) => (
                 <QueueCard key={item.constituentId} item={item} rank={i + 1} />
               ))}
             </div>
           )}
+
           {result.items.length === 0 && (
             <p className="text-sm text-[var(--muted)]">
               No actions fit this budget and channel mix. Try more hours or additional channels.

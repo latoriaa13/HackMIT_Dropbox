@@ -1,0 +1,232 @@
+"use client";
+
+import { useState } from "react";
+import type { CalendarAwareSchedule, SchedulableFundraisingTask } from "@tuesday/core";
+import { formatCurrency } from "@/lib/format";
+import Link from "next/link";
+
+type ViewMode = "queue" | "schedule" | "split";
+
+function formatRange(start: string, end: string) {
+  const s = new Date(start);
+  const e = new Date(end);
+  return `${s.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–${e.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+function taskRowClass(task: SchedulableFundraisingTask) {
+  if (task.hasCalendarConflict) return "border-red-300 bg-red-50";
+  if (task.schedulingStatus === "approved") return "border-green-300 bg-green-50";
+  if (task.schedulingStatus === "denied") return "border-stone-200 bg-stone-50 opacity-60";
+  return "border-orange-200 bg-orange-50";
+}
+
+export function CalendarAwareScheduleView({
+  schedule,
+  queueItems,
+  viewMode,
+  onViewModeChange,
+  onScheduleUpdated,
+  staffHours,
+}: {
+  schedule: CalendarAwareSchedule;
+  queueItems: Array<{ constituentId: string; constituentName: string; recommendedAction: string; whyNow: string }>;
+  viewMode: ViewMode;
+  onViewModeChange: (m: ViewMode) => void;
+  onScheduleUpdated: (s: CalendarAwareSchedule) => void;
+  staffHours: number;
+}) {
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [altTaskId, setAltTaskId] = useState<string | null>(null);
+  const [alternatives, setAlternatives] = useState<Array<{ start: string; end: string }>>([]);
+
+  const timeline = [...schedule.timeline].sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+  );
+
+  const act = async (path: string, method = "POST", body?: unknown) => {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message ?? data.error ?? "Request failed");
+    if (data.schedule) onScheduleUpdated(data.schedule);
+    return data;
+  };
+
+  const loadAlternatives = async (taskId: string) => {
+    setBusyTaskId(taskId);
+    setAltTaskId(taskId);
+    try {
+      const data = await fetch(`/api/tuesday/schedule/${taskId}/reschedule`).then((r) => r.json());
+      setAlternatives(data.alternatives ?? []);
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
+  const proposed = schedule.tasks.filter((t) => t.schedulingStatus === "proposed");
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border bg-white p-4 text-sm">
+        <p className="font-medium">Tuesday plan · {schedule.weekStart} – {schedule.weekEnd}</p>
+        <p className="mt-1 text-[var(--muted)]">
+          You have {staffHours} hours budgeted. Outlook shows {schedule.summary.outlookMeetingCount} meetings and{" "}
+          {Math.round(schedule.summary.totalAvailableWorkMinutes / 60)} hours of free work time. Tuesday found{" "}
+          {schedule.summary.tasksProposed} recommended fundraising actions.
+        </p>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <li>{schedule.summary.tasksProposed} tasks proposed</li>
+          <li>
+            {Math.floor(schedule.summary.scheduledMinutes / 60)}h {schedule.summary.scheduledMinutes % 60}m scheduled
+          </li>
+          <li>{Math.round(schedule.summary.availableFundraisingMinutes / 60)}h remaining capacity</li>
+          <li>{formatCurrency(schedule.summary.expectedOpportunity)} expected opportunity</li>
+          <li>{schedule.summary.tasksUnscheduled} could not fit</li>
+          <li>{schedule.summary.conflictCount} conflicts</li>
+        </ul>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(["queue", "schedule", "split"] as ViewMode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onViewModeChange(m)}
+            className={`rounded-lg px-3 py-1 text-sm capitalize ${
+              viewMode === m ? "bg-[var(--accent)] text-white" : "border bg-white"
+            }`}
+          >
+            {m === "split" ? "Split view" : `${m} view`}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="rounded-lg border bg-white px-3 py-1 text-sm"
+          disabled={!proposed.length}
+          onClick={() => act("/api/tuesday/schedule/approve-all")}
+        >
+          Approve all non-conflicting
+        </button>
+      </div>
+
+      {(viewMode === "schedule" || viewMode === "split") && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase text-[var(--muted)]">Weekly schedule</h3>
+          {timeline.map((entry) => {
+            const cls =
+              entry.kind === "outlook_event"
+                ? "border-blue-200 bg-blue-50"
+                : entry.kind === "free_block"
+                  ? "border-stone-100 bg-stone-50/80"
+                  : entry.kind === "buffer"
+                    ? "border-stone-200 bg-stone-100"
+                    : entry.conflict
+                      ? "border-red-400 bg-red-50"
+                      : "border-orange-200 bg-orange-50";
+            return (
+              <div key={entry.id} className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>
+                <p className="font-medium">
+                  {formatRange(entry.start, entry.end)} · {entry.label}
+                </p>
+                {entry.detail && <p className="mt-1 text-[var(--muted)]">{entry.detail}</p>}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {(viewMode === "queue" || viewMode === "split") && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase text-[var(--muted)]">Fundraising tasks</h3>
+          {schedule.tasks.map((task) => (
+            <div key={task.id} className={`rounded-lg border p-4 text-sm ${taskRowClass(task)}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold">
+                    {task.suggestedStart && task.suggestedEnd
+                      ? `${formatRange(task.suggestedStart, task.suggestedEnd)} · `
+                      : "Unscheduled · "}
+                    {task.title}
+                  </p>
+                  <p className="mt-1 text-[var(--muted)]">{task.whyNow}</p>
+                  {task.whyThisTime && <p className="mt-1 text-xs">Why this time: {task.whyThisTime}</p>}
+                  <p className="mt-1 text-xs">
+                    {task.estimatedMinutes} min · {formatCurrency(task.expectedOpportunity)} expected · confidence{" "}
+                    {Math.round(task.confidence * 100)}%
+                    {task.hasCalendarConflict && " · conflicts with Outlook"}
+                  </p>
+                  <Link href={`/constituents/${task.constituentId}`} className="mt-1 inline-block text-xs text-[var(--accent)]">
+                    View constituent
+                  </Link>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {task.schedulingStatus === "proposed" && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={busyTaskId === task.id}
+                        className="rounded border bg-white px-2 py-1 text-xs"
+                        onClick={() => loadAlternatives(task.id)}
+                      >
+                        Change time
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-green-700 px-2 py-1 text-xs text-white"
+                        onClick={() => act(`/api/tuesday/schedule/${task.id}/approve`)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded border px-2 py-1 text-xs"
+                        onClick={() => act(`/api/tuesday/schedule/${task.id}/deny`)}
+                      >
+                        Deny
+                      </button>
+                    </>
+                  )}
+                  {task.schedulingStatus === "approved" && (
+                    <span className="text-xs font-medium text-green-800">Approved · draft in Autopilot</span>
+                  )}
+                </div>
+              </div>
+              {altTaskId === task.id && alternatives.length > 0 && (
+                <ul className="mt-2 space-y-1 border-t pt-2 text-xs">
+                  <li className="font-medium text-[var(--muted)]">Suggested alternatives</li>
+                  {alternatives.map((slot) => (
+                    <li key={slot.start}>
+                      <button
+                        type="button"
+                        className="text-[var(--accent)] hover:underline"
+                        onClick={() =>
+                          act(`/api/tuesday/schedule/${task.id}/reschedule`, "POST", {
+                            start: slot.start,
+                            end: slot.end,
+                          }).then(() => {
+                            setAltTaskId(null);
+                            setAlternatives([]);
+                          })
+                        }
+                      >
+                        Use {formatRange(slot.start, slot.end)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+          {viewMode === "queue" && queueItems.length > 0 && (
+            <p className="text-xs text-[var(--muted)]">
+              Queue also includes {queueItems.length} prioritized actions from the fundraising engine.
+            </p>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}

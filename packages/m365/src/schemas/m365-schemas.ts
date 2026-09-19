@@ -26,8 +26,18 @@ export const CalendarEventSchema = z.object({
   timezone: z.string(),
   location: z.string().optional(),
   isAllDay: z.boolean().optional(),
+  showAs: z.string().optional(),
+  sensitivity: z.string().optional(),
+  isPrivate: z.boolean().optional(),
+  attendeeCount: z.number().optional(),
 });
 export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
+
+export const CalendarWeekQuerySchema = z.object({
+  weekStart: z.string().optional(),
+  timezone: z.string().default("America/New_York"),
+});
+export type CalendarWeekQuery = z.infer<typeof CalendarWeekQuerySchema>;
 
 export const FindFreeSlotsInputSchema = z.object({
   start: z.string(),

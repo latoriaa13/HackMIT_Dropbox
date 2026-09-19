@@ -96,14 +96,30 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
           start: { dateTime: string };
           end: { dateTime: string };
           location?: { displayName?: string };
-        }) => ({
-          id: ev.id,
-          subject: ev.subject,
-          start: ev.start.dateTime,
-          end: ev.end.dateTime,
-          timezone: input.timezone,
-          location: ev.location?.displayName,
-        })
+          isAllDay?: boolean;
+          showAs?: string;
+          sensitivity?: string;
+          attendees?: unknown[];
+        }) => {
+          const isPrivate =
+            ev.sensitivity === "private" ||
+            ev.sensitivity === "confidential" ||
+            ev.sensitivity === "personal";
+          const subject = isPrivate ? "Busy / private event" : ev.subject || "Busy";
+          return {
+            id: ev.id,
+            subject,
+            start: ev.start.dateTime,
+            end: ev.end.dateTime,
+            timezone: input.timezone,
+            location: isPrivate ? undefined : ev.location?.displayName,
+            isAllDay: ev.isAllDay,
+            showAs: ev.showAs,
+            sensitivity: ev.sensitivity,
+            isPrivate,
+            attendeeCount: Array.isArray(ev.attendees) ? ev.attendees.length : undefined,
+          };
+        }
       );
     });
   }
