@@ -28,3 +28,5 @@ export * from "./storage/schedule-store";
 export * from "./scheduling/calendar-fetch";
 export * from "./scheduling/schedule-task-approve";
 export * from "./scheduling/calendar-access";
+export * from "./auth/graph-capabilities";
+export * from "./auth/token-scopes";

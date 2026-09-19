@@ -2,7 +2,9 @@ import type { AuthenticationResult, AccountInfo } from "@azure/msal-node";
 import { createMsalClient, loadMsalCacheIntoClient, persistMsalCacheFromClient } from "./msal-server";
 import { getMicrosoftAccount } from "./account-store";
 import { M365AuthError } from "./errors";
-import { M365_SCOPES_CALENDAR, M365_SCOPES_MAIL } from "./scopes";
+import { M365_SCOPES_CALENDAR, M365_SCOPES_MAIL, mergeGrantedScopes } from "./scopes";
+import { scopesFromAccessToken } from "./token-scopes";
+import { saveMicrosoftAccount } from "./account-store";
 
 function mapMsalError(e: unknown, requiredScopes: string[]): never {
   const msg = e instanceof Error ? e.message : String(e);
@@ -44,13 +46,42 @@ async function acquireForAccount(
     throw new M365AuthError("Microsoft account not found in cache — reconnect.", "reauth_required");
   }
   try {
-    const result = await client.acquireTokenSilent({ account, scopes, forceRefresh: false });
+    let result = await client.acquireTokenSilent({ account, scopes, forceRefresh: false });
     if (!result?.accessToken) throw new Error("No access token");
     await persistMsalCacheFromClient(client, sessionUserId);
+    syncTokenScopesToAccount(sessionUserId, result.accessToken, result.scopes);
     return result;
   } catch (e) {
-    mapMsalError(e, scopes);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.toLowerCase().includes("invalid_grant") || msg.toLowerCase().includes("no tokens found")) {
+      mapMsalError(e, scopes);
+    }
+    try {
+      const result = await client.acquireTokenSilent({ account, scopes, forceRefresh: true });
+      if (!result?.accessToken) throw new Error("No access token");
+      await persistMsalCacheFromClient(client, sessionUserId);
+      syncTokenScopesToAccount(sessionUserId, result.accessToken, result.scopes);
+      return result;
+    } catch (retryErr) {
+      mapMsalError(retryErr, scopes);
+    }
   }
+}
+
+function syncTokenScopesToAccount(
+  sessionUserId: string,
+  accessToken: string,
+  msalScopes?: string[]
+) {
+  const link = getMicrosoftAccount(sessionUserId);
+  if (!link) return;
+  const fromJwt = scopesFromAccessToken(accessToken);
+  const incoming = msalScopes?.length ? msalScopes : fromJwt;
+  if (!incoming.length) return;
+  saveMicrosoftAccount({
+    ...link,
+    grantedScopes: mergeGrantedScopes(link.grantedScopes, incoming),
+  });
 }
 
 export async function getGraphAccessToken(sessionUserId: string, scopeGroup: "user" | "calendar" | "mail" = "user") {
@@ -59,14 +90,22 @@ export async function getGraphAccessToken(sessionUserId: string, scopeGroup: "us
   let scopes: string[] = base;
   if (scopeGroup === "calendar") scopes = [...base, ...M365_SCOPES_CALENDAR];
   if (scopeGroup === "mail") scopes = [...base, ...M365_SCOPES_MAIL];
-  const granted = link?.grantedScopes ?? [];
-  if (scopeGroup === "calendar" && !granted.some((g) => g.includes("Calendar"))) {
-    throw new M365AuthError("Calendar permission not granted.", "insufficient_scope", [...M365_SCOPES_CALENDAR]);
-  }
-  if (scopeGroup === "mail" && !granted.some((g) => g.includes("Mail"))) {
-    throw new M365AuthError("Mail permission not granted.", "insufficient_scope", [...M365_SCOPES_MAIL]);
-  }
   const result = await acquireForAccount(sessionUserId, scopes);
+  const tokenScopes = scopesFromAccessToken(result.accessToken);
+  if (scopeGroup === "calendar" && !tokenScopes.some((g) => g.includes("Calendars"))) {
+    throw new M365AuthError(
+      "Calendar permission is not on your Microsoft token. Use Connect calendar and accept Calendars.Read.",
+      "insufficient_scope",
+      [...M365_SCOPES_CALENDAR]
+    );
+  }
+  if (scopeGroup === "mail" && !tokenScopes.some((g) => g.includes("Mail"))) {
+    throw new M365AuthError(
+      "Mail permission is not on your Microsoft token. Use Connect mail and accept Mail.Read / Mail.Send.",
+      "insufficient_scope",
+      [...M365_SCOPES_MAIL]
+    );
+  }
   return result.accessToken;
 }
 

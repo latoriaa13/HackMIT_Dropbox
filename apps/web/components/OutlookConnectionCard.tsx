@@ -6,15 +6,21 @@ import { formatM365UserError } from "@/lib/m365-user-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
 
 type M365Status = {
-  connected: boolean;
+  accountLinked?: boolean;
+  connected?: boolean;
+  outlookReady?: boolean;
+  mailAutopilotReady?: boolean;
+  calendarReady?: boolean;
+  mailReady?: boolean;
   canStartOAuth?: boolean;
   configurationError?: boolean;
   email?: string;
   accountEmail?: string;
-  connectUrl?: string;
+  message?: string;
   missingCalendarConsent?: boolean;
   missingMailConsent?: boolean;
   grantedScopes?: string[];
+  capabilityErrors?: { profile?: string; calendar?: string; mail?: string };
 };
 
 type CalendarCache = {
@@ -26,7 +32,7 @@ type CalendarCache = {
 export function OutlookConnectionCard({
   onConnectionChange,
 }: {
-  onConnectionChange?: (connected: boolean) => void;
+  onConnectionChange?: (outlookReady: boolean) => void;
 }) {
   const [status, setStatus] = useState<M365Status | null>(null);
   const [cache, setCache] = useState<CalendarCache>(null);
@@ -36,13 +42,13 @@ export function OutlookConnectionCard({
     null
   );
 
-  const load = useCallback(async () => {
-    const st = await fetch("/api/m365/status").then((r) => r.json());
+  const load = useCallback(async (verify = false) => {
+    const q = verify ? "?verify=1" : "";
+    const st = await fetch(`/api/m365/status${q}`).then((r) => r.json());
     setStatus(st);
-    onConnectionChange?.(st.connected === true && !st.missingCalendarConsent);
-    setPermissionError(null);
+    onConnectionChange?.(st.outlookReady === true);
 
-    if (st.connected && !st.missingCalendarConsent) {
+    if (st.outlookReady) {
       const weekRes = await fetch("/api/m365/calendar/week");
       const week = await weekRes.json().catch(() => ({}));
       if (!weekRes.ok) {
@@ -56,21 +62,18 @@ export function OutlookConnectionCard({
           weekStart: week.cache.weekStart,
           weekEnd: week.cache.weekEnd,
         });
-      } else {
-        setCache(null);
-      }
+      } else setCache(null);
     } else {
       setCache(null);
     }
+    setPermissionError(null);
   }, [onConnectionChange]);
 
   useEffect(() => {
     load();
     const p = new URLSearchParams(window.location.search);
-    const oauthCodes = ["connected", "calendar_connected", "mail_connected", "error"] as const;
-    for (const key of oauthCodes) {
+    for (const key of ["connected", "calendar_connected", "mail_connected", "error"] as const) {
       const val = p.get(key);
-      if (!val && key !== "error") continue;
       if (key === "error" && val && consumeMicrosoftOAuthReturn()) {
         setBanner({ type: "err", text: formatOAuthReturnMessage(val) });
         window.history.replaceState({}, "", "/");
@@ -79,19 +82,20 @@ export function OutlookConnectionCard({
       if (key !== "error" && val && consumeMicrosoftOAuthReturn()) {
         setBanner({ type: "ok", text: formatOAuthReturnMessage(key) });
         window.history.replaceState({}, "", "/");
-        load();
+        load(true);
         break;
       }
     }
   }, [load]);
 
   const refreshCalendar = async () => {
-    if (status?.missingCalendarConsent) {
-      setPermissionError(formatM365UserError({ code: "MICROSOFT365_PERMISSION_ERROR", requiredScopes: ["Calendars.Read"] }));
+    if (!status?.outlookReady) {
+      setPermissionError(
+        formatM365UserError({ code: "MICROSOFT365_PERMISSION_ERROR", requiredScopes: ["Calendars.Read"] })
+      );
       return;
     }
     setRefreshing(true);
-    setPermissionError(null);
     try {
       const res = await fetch("/api/m365/calendar/refresh", { method: "POST" });
       const data = await res.json().catch(() => ({}));
@@ -100,7 +104,7 @@ export function OutlookConnectionCard({
         return;
       }
       setBanner({ type: "ok", text: "Outlook calendar updated." });
-      await load();
+      await load(true);
     } finally {
       setRefreshing(false);
     }
@@ -116,33 +120,64 @@ export function OutlookConnectionCard({
 
   if (!status) return null;
 
-  if (!status.connected) {
+  if (!status.accountLinked) {
     return (
       <div className="rounded-xl border border-blue-200 bg-blue-50/80 p-5">
         <h2 className="text-lg font-semibold text-blue-950">Connect to Outlook</h2>
         <p className="mt-2 max-w-xl text-sm text-blue-900">
-          Sign in with Microsoft to read your Outlook calendar and plan fundraising work around real
-          meetings.
+          Sign in with Microsoft and approve <strong>Calendars.Read</strong> so Tuesday can read availability and
+          plan around real meetings.
         </p>
         {status.configurationError ? (
           <p className="mt-3 text-sm text-red-800">Microsoft Entra is not configured on this server.</p>
         ) : (
           <div className="mt-4 flex flex-wrap gap-2">
-            <MicrosoftPermissionConnect
-              consent="full"
-              returnTo="/"
-              label="Connect to Outlook"
-              variant="primary"
-            />
+            <MicrosoftPermissionConnect consent="full" returnTo="/" label="Connect to Outlook" variant="primary" />
           </div>
         )}
-        <p className="mt-3 text-xs text-blue-800">No simulated calendar data — connection required.</p>
         {banner && (
-          <p
-            className={`mt-3 rounded-lg px-3 py-2 text-sm ${banner.type === "ok" ? "bg-green-100 text-green-900" : "bg-red-100 text-red-900"}`}
-          >
+          <p className={`mt-3 rounded-lg px-3 py-2 text-sm ${banner.type === "ok" ? "bg-green-100" : "bg-red-100"}`}>
             {banner.text}
           </p>
+        )}
+      </div>
+    );
+  }
+
+  if (!status.outlookReady) {
+    return (
+      <div className="rounded-xl border border-amber-300 bg-amber-50/90 p-5">
+        {banner && (
+          <p className={`mb-3 rounded-lg px-3 py-2 text-sm ${banner.type === "ok" ? "bg-green-100" : "bg-red-100"}`}>
+            {banner.text}
+          </p>
+        )}
+        <h2 className="text-lg font-semibold text-amber-950">Microsoft signed in — calendar not verified</h2>
+        <p className="mt-2 text-sm text-amber-900">{email}</p>
+        <p className="mt-2 max-w-xl text-sm text-amber-900">
+          {status.message ??
+            "We could not read your Outlook calendar yet. Connect calendar permissions (same flow as mail on Autopilot)."}
+        </p>
+        {status.capabilityErrors?.calendar && (
+          <p className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+            {status.capabilityErrors.calendar}
+          </p>
+        )}
+        {status.capabilityErrors?.mail && (
+          <p className="mt-2 text-xs text-amber-800">{status.capabilityErrors.mail}</p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" variant="primary" />
+          <MicrosoftPermissionConnect consent="full" returnTo="/" label="Reconnect (all permissions)" />
+          <button type="button" onClick={disconnect} className="rounded-lg border bg-white px-3 py-2 text-sm">
+            Disconnect
+          </button>
+        </div>
+        {permissionError && (
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
+            <p className="font-medium">{permissionError.title}</p>
+            <p className="mt-1">{permissionError.detail}</p>
+          </div>
         )}
       </div>
     );
@@ -151,35 +186,34 @@ export function OutlookConnectionCard({
   return (
     <div className="rounded-xl border border-green-200 bg-green-50/60 p-5">
       {banner && (
-        <p
-          className={`mb-3 rounded-lg px-3 py-2 text-sm ${banner.type === "ok" ? "bg-green-100 text-green-900" : "bg-red-100 text-red-900"}`}
-        >
+        <p className={`mb-3 rounded-lg px-3 py-2 text-sm ${banner.type === "ok" ? "bg-green-100 text-green-900" : "bg-red-100 text-red-900"}`}>
           {banner.text}
         </p>
       )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-green-950">Connected to Outlook</h2>
-          <p className="mt-1 text-sm text-green-900">{email ?? "Microsoft 365 account"}</p>
+          <h2 className="text-lg font-semibold text-green-950">Outlook calendar connected</h2>
+          <p className="mt-1 text-sm text-green-900">{email}</p>
+          <p className="mt-1 text-xs text-green-800">Verified with Microsoft Graph — availability and refresh use live data.</p>
           {status.grantedScopes && status.grantedScopes.length > 0 && (
-            <p className="mt-1 text-xs text-green-800">
-              Permissions: {status.grantedScopes.filter((s) => !s.includes("offline")).join(", ")}
+            <p className="mt-1 text-xs text-green-800">Token scopes: {status.grantedScopes.join(", ")}</p>
+          )}
+          {!status.mailAutopilotReady && (
+            <p className="mt-2 text-xs text-amber-900">
+              Mail not verified for send — use Autopilot → Connect mail for email drafts.
             </p>
           )}
           {cache?.syncedAt && (
             <p className="mt-1 text-xs text-green-800">
-              Last calendar sync: {new Date(cache.syncedAt).toLocaleString()}
+              Last sync: {new Date(cache.syncedAt).toLocaleString()}
               {cache.weekStart && ` · week ${cache.weekStart}`}
             </p>
-          )}
-          {!cache?.syncedAt && !status.missingCalendarConsent && (
-            <p className="mt-1 text-xs text-amber-900">Calendar not synced yet — build or refresh your schedule.</p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={refreshing || status.missingCalendarConsent}
+            disabled={refreshing}
             onClick={refreshCalendar}
             className="rounded-lg border bg-white px-3 py-2 text-sm disabled:opacity-50"
           >
@@ -190,48 +224,17 @@ export function OutlookConnectionCard({
           </button>
         </div>
       </div>
-
-      {status.missingCalendarConsent && (
-        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <p className="font-medium">Calendar not connected yet</p>
-          <p className="mt-1">
-            Your Microsoft account is linked, but Outlook calendar access was not approved. Use the same
-            flow as mail — Microsoft will ask you to allow <strong>Calendars.Read</strong>.
-          </p>
-          <div className="mt-3">
-            <MicrosoftPermissionConnect
-              consent="calendar"
-              returnTo="/"
-              label="Connect calendar"
-              variant="primary"
-            />
-          </div>
-        </div>
-      )}
-
-      {status.connected && !status.missingCalendarConsent && status.missingMailConsent && (
-        <div className="mt-4 rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm">
-          <p className="font-medium">Mail optional for this page</p>
-          <p className="mt-1 text-[var(--muted)]">
-            Calendar is connected. Connect mail separately if you want Autopilot email drafts.
-          </p>
-          <div className="mt-2">
-            <MicrosoftPermissionConnect consent="mail" returnTo="/" label="Connect mail" />
-          </div>
-        </div>
-      )}
-
       {permissionError && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950">
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
           <p className="font-medium">{permissionError.title}</p>
           <p className="mt-1">{permissionError.detail}</p>
           {permissionError.action && (
             <MicrosoftPermissionConnect
               consent={permissionError.action.consent}
-              returnTo={permissionError.action.returnTo ?? "/"}
+              returnTo="/"
               label={permissionError.action.label}
               variant="primary"
-              className="mt-3"
+              className="mt-2"
             />
           )}
         </div>

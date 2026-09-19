@@ -49,6 +49,13 @@ export function formatM365UserError(data: {
         detail: "Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET in .env.local, then restart the dev server.",
       };
     default:
+      if (message.toLowerCase().includes("admin consent")) {
+        return {
+          title: "Admin consent required",
+          detail:
+            "Your Azure tenant requires an administrator to grant delegated Graph permissions for this app. In Entra → App registrations → API permissions → Grant admin consent for org.",
+        };
+      }
       if (message.toLowerCase().includes("calendar permission")) {
         return {
           title: "Calendar permission required",

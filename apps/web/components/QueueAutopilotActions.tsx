@@ -6,6 +6,8 @@ import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConn
 
 type M365Session = {
   connected: boolean;
+  mailAutopilotReady?: boolean;
+  accountLinked?: boolean;
   canStartOAuth?: boolean;
   configurationError?: boolean;
   missingCalendarConsent?: boolean;
@@ -26,9 +28,10 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
       .then(setM365);
   }, []);
 
-  const connected = m365?.connected === true;
-  const canMail = connected && !m365?.missingMailConsent;
-  const canCalendar = connected && !m365?.missingCalendarConsent;
+  const mailReady = m365?.mailAutopilotReady === true;
+  const calendarReady = m365?.calendarReady === true;
+  const canMail = mailReady;
+  const canCalendar = calendarReady;
 
   const draftEmail = async () => {
     if (!canMail) {
@@ -97,7 +100,20 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
     );
   }
 
-  if (m365 && !connected) {
+  if (m365?.accountLinked && !mailReady && !calendarReady) {
+    return (
+      <div className="mt-3 border-t pt-3">
+        <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
+        <p className="mt-1 text-xs text-amber-900">Microsoft signed in — connect mail or calendar to use Autopilot actions.</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <MicrosoftPermissionConnect consent="mail" returnTo="/" label="Connect mail" className="!px-2 !py-1 !text-xs" />
+          <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" className="!px-2 !py-1 !text-xs" />
+        </div>
+      </div>
+    );
+  }
+
+  if (m365 && !m365.accountLinked) {
     return (
       <div className="mt-3 border-t pt-3">
         <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
@@ -142,12 +158,12 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
           Open Autopilot
         </a>
       </div>
-      {!canMail && connected && (
+      {!canMail && m365?.accountLinked && (
         <a href="/api/auth/microsoft/connect?consent=mail" className="mt-1 block text-xs text-[var(--accent)]">
           Mail access required
         </a>
       )}
-      {!canCalendar && connected && (
+      {!canCalendar && m365?.accountLinked && (
         <a href="/api/auth/microsoft/connect?consent=calendar" className="mt-1 block text-xs text-[var(--accent)]">
           Calendar access required
         </a>

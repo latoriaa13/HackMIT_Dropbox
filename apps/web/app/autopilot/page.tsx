@@ -25,6 +25,10 @@ type Status = {
   oauthConfigured: boolean;
   missingCalendarConsent?: boolean;
   missingMailConsent?: boolean;
+  mailAutopilotReady?: boolean;
+  calendarReady?: boolean;
+  accountLinked?: boolean;
+  capabilityErrors?: { calendar?: string; mail?: string };
   configErrors?: string[];
   message?: string;
 };
@@ -49,7 +53,7 @@ export default function AutopilotPage() {
 
   const refresh = useCallback(async () => {
     const [st, pending, aud, t] = await Promise.all([
-      fetch("/api/m365/status").then((r) => r.json()),
+      fetch("/api/m365/status?verify=1").then((r) => r.json()),
       fetch("/api/automation/pending").then((r) => r.json()),
       fetch("/api/automation/audit").then((r) => r.json()),
       fetch("/api/automation/tasks").then((r) => r.json()),
@@ -169,10 +173,21 @@ export default function AutopilotPage() {
                 tasks.
               </p>
             )}
-            {status.connected && (
+            {status.mailAutopilotReady && (
               <p className="rounded border border-green-200 bg-green-50 px-3 py-2 text-green-900">
-                Connected — approving drafts sends through your Microsoft mailbox and calendar.
+                Mail verified — you can draft and approve email through Graph.
               </p>
+            )}
+            {status.accountLinked && !status.mailAutopilotReady && (
+              <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                Mail not verified yet — connect mail to draft and send email.
+              </p>
+            )}
+            {status.capabilityErrors?.mail && (
+              <p className="text-sm text-red-800">{status.capabilityErrors.mail}</p>
+            )}
+            {status.capabilityErrors?.calendar && (
+              <p className="text-sm text-red-800">{status.capabilityErrors.calendar}</p>
             )}
             {status.grantedScopes?.length > 0 && (
               <p className="text-xs text-[var(--muted)]">Granted: {status.grantedScopes.join(", ")}</p>
@@ -217,10 +232,10 @@ export default function AutopilotPage() {
 
       <section className="rounded-xl border bg-white p-5">
         <h2 className="font-semibold">Approval inbox</h2>
-        {!status?.connected && (
-          <p className="mt-2 text-sm text-amber-900">Connect Microsoft 365 to create and approve drafts.</p>
+        {!status?.mailAutopilotReady && (
+          <p className="mt-2 text-sm text-amber-900">Connect mail (verified) to create and approve email drafts.</p>
         )}
-        {status?.connected && emails.length === 0 && events.length === 0 && (
+        {status?.mailAutopilotReady && emails.length === 0 && events.length === 0 && (
           <p className="mt-2 text-sm text-[var(--muted)]">No pending drafts. Use Draft follow-up on the weekly queue.</p>
         )}
         {events.map((d) => (
@@ -265,7 +280,7 @@ export default function AutopilotPage() {
           <h2 className="font-semibold">Automation tasks</h2>
           <button
             type="button"
-            disabled={!status?.connected}
+            disabled={!status?.mailAutopilotReady}
             onClick={createTask}
             className="rounded-lg border px-3 py-1 text-sm disabled:opacity-50"
           >

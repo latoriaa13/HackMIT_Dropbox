@@ -41,8 +41,7 @@ export async function GET(request: Request) {
 
   const existing = getMicrosoftAccount(sessionId);
   const scopeList = scopesForIncrementalConsent(consent, existing?.grantedScopes);
-  const prompt =
-    consent === "calendar" || consent === "mail" ? "consent" : "select_account";
+  const prompt = consent === "basic" && existing ? "select_account" : "consent";
 
   try {
     const { state, nonce } = createOAuthState(sessionId, scopeList, {

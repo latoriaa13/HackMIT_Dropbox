@@ -7,6 +7,7 @@ import {
   saveMicrosoftAccount,
   getMicrosoftAccount,
   mergeGrantedScopes,
+  invalidateCapabilityCache,
   scopesForConsent,
 } from "@tuesday/m365";
 import {
@@ -73,16 +74,17 @@ export async function GET(request: Request) {
     const profile = await fetchMicrosoftProfile(result.accessToken);
     const account = result.account;
     const prior = getMicrosoftAccount(sessionId);
-    const fromToken = result.scopes?.length ? result.scopes : scopes;
+    const fromToken = result.scopes?.length ? result.scopes : [];
     saveMicrosoftAccount({
       sessionUserId: sessionId,
       homeAccountId: account?.homeAccountId ?? profile.id,
       displayName: profile.displayName,
       email: profile.email || account?.username || "",
       tenantId: account?.tenantId ?? "common",
-      grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken),
+      grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken.length ? fromToken : []),
       connectedAt: prior?.connectedAt ?? new Date().toISOString(),
     });
+    invalidateCapabilityCache(sessionId);
 
     const returnTo = pending.returnTo?.startsWith("/") ? pending.returnTo : "/autopilot";
     const qs = new URLSearchParams();
