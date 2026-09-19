@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T21:01:07.129Z",
+  "generatedAt": "2026-09-19T21:16:52.122Z",
   "files": [
     "activities.csv",
     "affiliations.csv",
@@ -23,6 +23,6 @@
     "donorCount": 6734,
     "lybuntCount": 1002,
     "currentFiscalYear": 2026,
-    "generatedAt": "2026-09-19T21:01:07.129Z"
+    "generatedAt": "2026-09-19T21:16:52.122Z"
   }
 }

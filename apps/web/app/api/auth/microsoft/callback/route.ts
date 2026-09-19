@@ -25,13 +25,10 @@ export async function GET(request: Request) {
   const errorDesc = url.searchParams.get("error_description");
   const state = url.searchParams.get("state");
   const req = request as import("next/server").NextRequest;
-  const sessionId = getSessionUserIdFromRequest(req);
 
-  function redirectWithSession(path: string) {
+  function redirectWithSession(path: string, sessionId?: string) {
     const res = NextResponse.redirect(`${base}${path}`);
-    if (!verifySessionCookie(req.cookies.get("tuesday_session")?.value)) {
-      attachSessionCookie(res, sessionId, req);
-    }
+    if (sessionId) attachSessionCookie(res, sessionId, req);
     return res;
   }
 
@@ -50,9 +47,15 @@ export async function GET(request: Request) {
   }
 
   const pending = consumeOAuthState(state);
-  if (!pending || pending.sessionId !== sessionId) {
+  if (!pending) {
     return redirectWithSession("/autopilot?error=invalid_oauth_state");
   }
+
+  const cookieSession = verifySessionCookie(req.cookies.get("tuesday_session")?.value);
+  if (cookieSession && cookieSession !== pending.sessionId) {
+    return redirectWithSession("/autopilot?error=invalid_oauth_state");
+  }
+  const sessionId = pending.sessionId;
 
   try {
     const scopes = pending.scopes.length ? pending.scopes : scopesForConsent("full");
@@ -68,9 +71,9 @@ export async function GET(request: Request) {
       grantedScopes: result.scopes?.length ? result.scopes : scopes,
       connectedAt: new Date().toISOString(),
     });
-    return redirectWithSession("/autopilot?connected=1");
+    return redirectWithSession("/autopilot?connected=1", sessionId);
   } catch (e) {
     const msg = encodeURIComponent(e instanceof Error ? e.message : "callback_failed");
-    return redirectWithSession(`/autopilot?error=${msg}`);
+    return redirectWithSession(`/autopilot?error=${msg}`, sessionId);
   }
 }

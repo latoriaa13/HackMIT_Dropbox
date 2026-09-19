@@ -29,8 +29,8 @@ export async function GET(request: Request) {
   }
 
   const req = request as import("next/server").NextRequest;
-  const hadSession = !!verifySessionCookie(req.cookies.get("tuesday_session")?.value);
-  const sessionId = getSessionUserIdFromRequest(req);
+  const verified = verifySessionCookie(req.cookies.get("tuesday_session")?.value);
+  const sessionId = verified ?? getSessionUserIdFromRequest(req);
   const url = new URL(request.url);
   const consentParam = url.searchParams.get("consent");
   const consent: ConsentKind =
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     const { state, nonce } = createOAuthState(sessionId, scopeList, consent);
     const authorizeUrl = await getAuthCodeUrl({ state, nonce, consent });
     const res = NextResponse.redirect(authorizeUrl);
-    if (!hadSession) attachSessionCookie(res, sessionId, req);
+    attachSessionCookie(res, sessionId, req);
     return res;
   } catch (e) {
     const msg = encodeURIComponent(e instanceof Error ? e.message : "OAuth failed");
