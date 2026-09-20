@@ -6,3 +6,4 @@ data/automation
 .env
 .env.local
 *.log
+.env

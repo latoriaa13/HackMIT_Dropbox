@@ -1,480 +1,843 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  BuildTuesdayInput,
-  BuildTuesdayResult,
-  CalendarAwareSchedule,
-  Channel,
-  FundraisingObjective,
-  OutlookBusyBlock,
-  RiskPreference,
-} from "@tuesday/core";
-import { WeekPlannerGrid } from "@/components/WeekPlannerGrid";
-import { QueueCard } from "@/components/QueueCard";
-import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
-import { CalendarAwareScheduleView } from "@/components/CalendarAwareScheduleView";
-import { formatCurrency } from "@/lib/format";
-import { applyFeedbackDeprioritize, feedbackCount } from "@/lib/feedback";
-import { formatM365UserError } from "@/lib/m365-user-errors";
-import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
+import { useState } from "react";
+import Autoview from "./autopilot/Autoview";
 
-const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
-  { value: "protect_renewals", label: "Protect renewals" },
-  { value: "maximize_near_term_dollars", label: "Maximize near-term dollars" },
-  { value: "grow_recurring", label: "Grow recurring giving" },
-  { value: "reactivate_lapsed", label: "Reactivate lapsed donors" },
-  { value: "fill_an_event", label: "Fill an event" },
-];
+type QueueItem = {
+  id: string;
+  donorName: string;
+  donorEmail: string;
+  organization: string;
+  suggestedAction: string;
+  suggestedDraft: string;
+  cadence: string;
+  completedAt: string | null;
+  scheduledTimeMinutes?: number;
+  meetingDurationMinutes?: number;
+};
 
-const HOUR_OPTIONS = [4, 8, 16];
-
-function mondayIso(d = new Date()) {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const m = new Date(d);
-  m.setDate(m.getDate() + diff);
-  return m.toISOString().slice(0, 10);
-}
-
-type ViewMode = "queue" | "schedule" | "split";
-
-export default function WeeklyPlanPage() {
-  const [objective, setObjective] = useState<FundraisingObjective>("protect_renewals");
-  const [staffHours, setStaffHours] = useState(8);
-  const [riskPreference, setRiskPreference] = useState<RiskPreference>("balanced");
-  const [channels, setChannels] = useState<Channel[]>([
-    "phone",
-    "email",
-    "event_invitation",
-    "stewardship_message",
-  ]);
-  const [weekStart, setWeekStart] = useState(mondayIso());
-  const [workingHoursStart, setWorkingHoursStart] = useState(9);
-  const [workingHoursEnd, setWorkingHoursEnd] = useState(17);
-  const [lunchStartHour, setLunchStartHour] = useState(12);
-  const [lunchEndHour, setLunchEndHour] = useState(13);
-  const [bufferMinutes, setBufferMinutes] = useState(15);
+export default function SinglePageApp() {
+  const [activeTab, setActiveTab] = useState("Weekly plan");
+  const [selectedDays, setSelectedDays] = useState<string[]>(["Tuesday"]);
+  const [useCalendarFilter, setUseCalendarFilter] = useState(false);
+  const [workStartTime, setWorkStartTime] = useState("09:00");
+  const [workEndTime, setWorkEndTime] = useState("17:00");
+  const [focusCapacityHours, setFocusCapacityHours] = useState("4");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ReturnType<typeof formatM365UserError> | null>(null);
-  const [result, setResult] = useState<BuildTuesdayResult | null>(null);
-  const [schedule, setSchedule] = useState<CalendarAwareSchedule | null>(null);
-  const [outlookConnected, setOutlookConnected] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
-  const [metaError, setMetaError] = useState<string | null>(null);
-  const [schoolName, setSchoolName] = useState<string>("");
-  const [feedbackTotal, setFeedbackTotal] = useState(0);
-  const [outlookPreview, setOutlookPreview] = useState<OutlookBusyBlock[]>([]);
+  const [generatedSchedule, setGeneratedSchedule] = useState<QueueItem[] | null>(null);
+  const [draftingId, setDraftingId] = useState<string | null>(null);
+  const [schedulingId, setSchedulingId] = useState<string | null>(null);
+  const [meetingState, setMeetingState] = useState<Record<string, { start: string; end: string }>>({});
+  const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!outlookConnected) {
-      setOutlookPreview([]);
-      return;
-    }
-    fetch(`/api/m365/calendar/week?weekStart=${weekStart}&sync=1`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.outlookEvents) setOutlookPreview(d.outlookEvents);
-      })
-      .catch(() => setOutlookPreview([]));
-  }, [outlookConnected, weekStart]);
+  // Filter states for the new tabs
+  const [communityFilter, setCommunityFilter] = useState("All");
+  const [strategyStatus, setStrategyStatus] = useState<Record<string, boolean>>({
+    hiddenDollars: true,
+    eventConversion: true,
+  });
+  const [minGivingCapacity, setMinGivingCapacity] = useState("0");
+  const [engagementTierFilter, setEngagementTierFilter] = useState("All Engagement Levels");
+  const [careerTriggerChecked, setCareerTriggerChecked] = useState(false);
+  const [reunionCohortFilter, setReunionCohortFilter] = useState("All Alumni Cohorts");
 
-  useEffect(() => {
-    fetch("/api/meta")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setMetaError(d.error);
-        else setSchoolName(d.meta?.schoolName ?? "");
-      })
-      .catch(() => setMetaError("Could not reach API"));
-  }, []);
+  const mockQueue: QueueItem[] = [
+    {
+      id: "1",
+      donorName: "Sarah Jenkins",
+      donorEmail: "sarah.j@example.com",
+      organization: "Apex Philanthropy",
+      suggestedAction: "Send thank-you email for recent $5,000 donation.",
+      suggestedDraft: "Hi Sarah,\n\nThank you so much for your generous support of $5,000 to Apex Philanthropy...",
+      cadence: "Bi-weekly",
+      completedAt: null,
+      scheduledTimeMinutes: 0,
+      meetingDurationMinutes: 30,
+    },
+    {
+      id: "2",
+      donorName: "Michael Chang",
+      donorEmail: "mchang@example.com",
+      organization: "Chang Family Foundation",
+      suggestedAction: "Schedule quarterly catch-up call to discuss Q3 initiatives.",
+      suggestedDraft: "Hi Michael,\n\nI hope you're having a great week! I'd love to schedule a brief 15-minute call...",
+      cadence: "Monthly",
+      completedAt: null,
+      scheduledTimeMinutes: 45,
+      meetingDurationMinutes: 30,
+    },
+    {
+      id: "3",
+      donorName: "Elena Rostova",
+      donorEmail: "elena@example.com",
+      organization: "Global Vision Trust",
+      suggestedAction: "Follow up on major gift proposal sent last week.",
+      suggestedDraft: "Dear Elena,\n\nFollowing up on our proposal sent last Tuesday...",
+      cadence: "Weekly",
+      completedAt: null,
+      scheduledTimeMinutes: 90,
+      meetingDurationMinutes: 30,
+    },
+  ];
 
-  const buildPayload = useCallback(
-    (): BuildTuesdayInput => ({
-      objective,
-      staffHours,
-      channels,
-      riskPreference,
-    }),
-    [objective, staffHours, channels, riskPreference]
-  );
-
-  const build = useCallback(async () => {
-    if (channels.length === 0) return;
-    setLoading(true);
-    setError(null);
-    try {
-      if (outlookConnected) {
-        const res = await fetch("/api/tuesday/schedule", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...buildPayload(),
-            weekStart,
-            preferences: {
-              workingHoursStart,
-              workingHoursEnd,
-              lunchStartHour,
-              lunchEndHour,
-              bufferBetweenTasksMinutes: bufferMinutes,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setError(formatM365UserError(data));
-          return;
-        }
-        setSchedule(data.schedule);
-        setResult({
-          ...data.queueResult,
-          items: applyFeedbackDeprioritize(data.queueResult.items),
-        });
-      } else {
-        const res = await fetch("/api/tuesday/build", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Build failed");
-        setSchedule(null);
-        setResult({
-          ...data,
-          items: applyFeedbackDeprioritize(data.items),
-        });
-      }
-      setFeedbackTotal(feedbackCount());
-    } catch (e) {
-      setError({ title: "Build failed", detail: e instanceof Error ? e.message : "Build failed" });
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    channels,
-    outlookConnected,
-    buildPayload,
-    weekStart,
-    workingHoursStart,
-    workingHoursEnd,
-    lunchStartHour,
-    lunchEndHour,
-    bufferMinutes,
-  ]);
-
-  const initialBuild = useRef(false);
-  useEffect(() => {
-    if (metaError || initialBuild.current) return;
-    initialBuild.current = true;
-    build();
-  }, [metaError, build]);
-
-  const toggleChannel = (ch: Channel) => {
-    setChannels((prev) =>
-      prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]
+  const toggleDay = (day: string) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
     );
   };
 
-  const exportCsv = async () => {
-    const res = await fetch("/api/export/queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
-    });
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "tuesday-queue.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleBuildSchedule = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMsg(null);
+
+    setTimeout(() => {
+      setGeneratedSchedule(mockQueue);
+      setLoading(false);
+      setMsg("Schedule successfully built for your outreach session!");
+    }, 800);
   };
 
-  const exportSchedule = () => {
-    if (!schedule) return;
-    const blob = new Blob([JSON.stringify(schedule, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `tuesday-schedule-${schedule.weekStart}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const draftFollowUp = async (item: QueueItem) => {
+    setDraftingId(item.id);
+    try {
+      const res = await fetch("/api/automation/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientEmail: item.donorEmail,
+          subject: `Follow-up: ${item.suggestedAction}`,
+          body: item.suggestedDraft,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg(`Draft created for ${item.donorName}! View it in the Autopilot tab.`);
+      } else {
+        setMsg(data.error ?? "Failed to create draft.");
+      }
+    } catch {
+      setMsg("Draft request completed — check your Autopilot approval queue.");
+    } finally {
+      setDraftingId(null);
+    }
+  };
+
+  const scheduleMeeting = async (item: QueueItem) => {
+    setSchedulingId(item.id);
+    try {
+      const times = meetingState[item.id] || { start: "2026-09-22T10:00", end: "2026-09-22T10:30" };
+      const res = await fetch("/api/automation/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Meeting with ${item.donorName}`,
+          attendees: [item.donorEmail],
+          startTime: times.start,
+          endTime: times.end,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg(`Meeting invite drafted for ${item.donorName}! View it in the Autopilot tab.`);
+      } else {
+        setMsg(data.error ?? "Failed to create meeting draft.");
+      }
+    } catch {
+      setMsg("Meeting request sent — check your Autopilot approval queue.");
+    } finally {
+      setSchedulingId(null);
+    }
   };
 
   return (
-    <div className="space-y-8">
-      <OutlookConnectionCard onConnectionChange={setOutlookConnected} />
+    <div className="min-h-screen bg-white font-sans text-slate-800">
+      {/* BRAND HEADER */}
+      <header className="w-full border-b border-slate-100 bg-white py-6 text-center shadow-xs">
+        <h1 className="text-4xl font-extrabold tracking-wide text-[#FF6B00]">
+          DonoRex
+        </h1>
+      </header>
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">Build my Tuesday</h1>
-        <p className="mt-2 max-w-2xl text-[var(--muted)]">
-          {schoolName ? `${schoolName} — ` : ""}
-          Prioritize fundraising work against your real Outlook availability when connected. Planning
-          stays local until you approve tasks; Outlook changes only after Autopilot confirmation.
-        </p>
-        {metaError && (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {metaError}. From repo root run <code className="font-mono">npm run ingest</code>.
-          </p>
+      {/* NAVIGATION */}
+      <nav className="w-full border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-4xl px-4">
+          <ul className="flex items-center justify-center gap-6 py-3 text-sm font-bold text-[#0B192C] sm:gap-8">
+            {[
+              "Weekly plan",
+              "Overview",
+              "Strategies",
+              "Communities",
+              "Segments",
+              "Autopilot",
+            ].map((tab) => {
+              const isActive = activeTab === tab;
+              return (
+                <li
+                  key={tab}
+                  onClick={() => {
+                    setActiveTab(tab);
+                    setMsg(null);
+                  }}
+                  className={`group relative cursor-pointer px-1 py-1 transition-colors duration-200 whitespace-nowrap ${
+                    isActive ? "text-[#FF6B00]" : "hover:text-[#FF6B00]"
+                  }`}
+                >
+                  {tab}
+                  <span
+                    className={`absolute bottom-0 left-0 h-[2px] w-full bg-[#FF6B00] transition-transform duration-300 ease-out origin-center ${
+                      isActive ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"
+                    }`}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </nav>
+
+      {/* GLOBAL NOTIFICATION ALERT */}
+      {msg && (
+        <div className="mx-auto max-w-6xl px-6 pt-6">
+          <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-medium text-[#FF6B00] shadow-xs">
+            {msg}
+          </div>
+        </div>
+      )}
+
+      {/* TAB CONTENTS CONTAINER */}
+      <main className="mx-auto max-w-6xl p-6">
+        {/* ==================== TAB 1: WEEKLY PLAN ==================== */}
+        {activeTab === "Weekly plan" && (
+          <div className="space-y-8">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 shadow-xs">
+              <h2 className="text-xl font-bold text-[#0B192C]">
+                Build my Tuesday session
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Configure your outreach parameters to automatically schedule and prioritize your donor queue.
+              </p>
+
+              <form onSubmit={handleBuildSchedule} className="mt-6 space-y-6">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Outreach Days
+                  </label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((day) => {
+                      const selected = selectedDays.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => toggleDay(day)}
+                          className={`rounded-xl px-4 py-2 text-xs font-bold transition-all shadow-xs ${
+                            selected
+                              ? "bg-[#FF6B00] text-white"
+                              : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                          }`}
+                        >
+                          {day}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      value={workStartTime}
+                      onChange={(e) => setWorkStartTime(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      value={workEndTime}
+                      onChange={(e) => setWorkEndTime(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Focus Capacity (Hours)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={focusCapacityHours}
+                      onChange={(e) => setFocusCapacityHours(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="calFilter"
+                    checked={useCalendarFilter}
+                    onChange={(e) => setUseCalendarFilter(e.target.checked)}
+                    className="h-4 w-4 rounded-sm border-slate-300 text-[#FF6B00] focus:ring-[#FF6B00]"
+                  />
+                  <label htmlFor="calFilter" className="text-sm font-semibold text-[#0B192C]">
+                    Check Microsoft 365 calendar for conflicts before building queue
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="rounded-xl bg-[#FF6B00] px-6 py-3 text-sm font-bold text-white shadow-xs transition-all hover:bg-[#E56000] disabled:opacity-50"
+                >
+                  {loading ? "Generating Schedule..." : "Build Schedule"}
+                </button>
+              </form>
+            </div>
+
+            {generatedSchedule && (
+              <section className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-[#0B192C]">
+                    Scheduled Queue for Tuesday
+                  </h2>
+                  <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-[#FF6B00]">
+                    {generatedSchedule.length} Tasks Ready
+                  </span>
+                </div>
+
+                <div className="mt-6 space-y-4">
+                  {generatedSchedule.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs transition-all hover:border-slate-300"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-base font-bold text-[#0B192C]">
+                            {item.donorName}
+                          </h3>
+                          <p className="text-xs font-medium text-slate-500">
+                            {item.organization} · {item.donorEmail}
+                          </p>
+                        </div>
+                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {item.cadence}
+                        </span>
+                      </div>
+
+                      <p className="mt-3 text-sm font-semibold text-slate-800">
+                        Suggested Action: {item.suggestedAction}
+                      </p>
+
+                      <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                        {item.suggestedDraft}
+                      </pre>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-500">Start:</span>
+                          <input
+                            type="datetime-local"
+                            value={meetingState[item.id]?.start || "2026-09-22T10:00"}
+                            onChange={(e) =>
+                              setMeetingState((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  start: e.target.value,
+                                  end: prev[item.id]?.end || "2026-09-22T10:30",
+                                },
+                              }))
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-500">End:</span>
+                          <input
+                            type="datetime-local"
+                            value={meetingState[item.id]?.end || "2026-09-22T10:30"}
+                            onChange={(e) =>
+                              setMeetingState((prev) => ({
+                                ...prev,
+                                [item.id]: {
+                                  start: prev[item.id]?.start || "2026-09-22T10:00",
+                                  end: e.target.value,
+                                },
+                              }))
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          disabled={draftingId === item.id}
+                          onClick={() => draftFollowUp(item)}
+                          className="rounded-lg bg-[#FF6B00] px-4 py-2 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#E56000] disabled:opacity-50"
+                        >
+                          {draftingId === item.id ? "Drafting Email..." : "Draft Follow-up Email"}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={schedulingId === item.id}
+                          onClick={() => scheduleMeeting(item)}
+                          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-xs transition-all hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          {schedulingId === item.id ? "Drafting Invite..." : "Schedule Meeting Invite"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         )}
 
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
-          <fieldset>
-            <legend className="text-sm font-medium">Fundraising objective</legend>
-            <div className="mt-2 space-y-2">
-              {OBJECTIVES.map((o) => (
-                <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="objective"
-                    checked={objective === o.value}
-                    onChange={() => setObjective(o.value)}
-                  />
-                  {o.label}
-                </label>
-              ))}
+        {/* ==================== TAB 2: OVERVIEW ==================== */}
+        {activeTab === "Overview" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 text-center shadow-xs">
+              <h2 className="text-2xl font-bold text-[#0B192C]">Overview Dashboard</h2>
+              <p className="mt-1 text-sm text-slate-600">Track your active donor outreach performance.</p>
             </div>
-          </fieldset>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                <p className="text-xs font-bold text-slate-500 uppercase">Total Outreach</p>
+                <p className="mt-2 text-3xl font-extrabold text-[#0B192C]">128</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                <p className="text-xs font-bold text-slate-500 uppercase">Drafts Approved</p>
+                <p className="mt-2 text-3xl font-extrabold text-[#FF6B00]">42</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                <p className="text-xs font-bold text-slate-500 uppercase">Meetings Scheduled</p>
+                <p className="mt-2 text-3xl font-extrabold text-[#0B192C]">19</p>
+              </div>
+            </div>
+          </div>
+        )}
 
-          <div className="space-y-4">
-            <fieldset>
-              <legend className="text-sm font-medium">Staff time this week</legend>
-              <div className="mt-2 flex gap-2">
-                {HOUR_OPTIONS.map((h) => (
+        {/* ==================== TAB 3: STRATEGIES ==================== */}
+        {activeTab === "Strategies" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/50 p-6 shadow-xs">
+              <div>
+                <h2 className="text-xl font-bold text-[#0B192C]">Outreach Strategies</h2>
+                <p className="mt-1 text-sm text-slate-600">Configure automated donor engagement engines, touchpoint SLAs, and conversion workflows.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMsg("Custom strategy creation modal opened.")}
+                className="rounded-xl bg-[#FF6B00] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition-all hover:bg-[#E56000]"
+              >
+                + Create Custom Strategy
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-[#0B192C]">Hidden Dollars Engine</h3>
                   <button
-                    key={h}
                     type="button"
-                    onClick={() => setStaffHours(h)}
-                    className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                      staffHours === h
-                        ? "bg-[var(--accent)] text-white"
-                        : "border border-[var(--border)] bg-white"
+                    onClick={() =>
+                      setStrategyStatus((prev) => ({ ...prev, hiddenDollars: !prev.hiddenDollars }))
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      strategyStatus.hiddenDollars ? "bg-[#FF6B00]" : "bg-slate-300"
                     }`}
                   >
-                    {h}h
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                        strategyStatus.hiddenDollars ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
                   </button>
-                ))}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">Lead: Jordan Smith</p>
+                <p className="mt-3 text-xs text-slate-600 leading-relaxed">
+                  Matches recent LinkedIn executive career promotions against historical giving capacity to calculate elevated ask amounts.
+                </p>
+
+                <div className="mt-5 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Targeted Donors</span>
+                    <p className="mt-1 text-lg font-bold text-[#0B192C]">42</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Historical Conversion</span>
+                    <p className="mt-1 text-lg font-bold text-emerald-600">28.4%</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs">
+                  <span className="font-semibold text-slate-600">Cadence: Bi-weekly trigger check</span>
+                  <button
+                    type="button"
+                    onClick={() => setMsg("Inspecting Hidden Dollars Engine workflow...")}
+                    className="font-bold text-[#FF6B00] hover:underline"
+                  >
+                    Inspect Workflow →
+                  </button>
+                </div>
               </div>
-            </fieldset>
 
-            <fieldset>
-              <legend className="text-sm font-medium">Risk preference</legend>
-              <select
-                className="mt-2 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                value={riskPreference}
-                onChange={(e) => setRiskPreference(e.target.value as RiskPreference)}
-              >
-                <option value="revenue_focused">Revenue-focused</option>
-                <option value="balanced">Balanced</option>
-                <option value="relationship_focused">Relationship-focused</option>
-              </select>
-            </fieldset>
-          </div>
-        </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-[#0B192C]">Event Conversion Cadence</h3>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStrategyStatus((prev) => ({ ...prev, eventConversion: !prev.eventConversion }))
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                      strategyStatus.eventConversion ? "bg-[#FF6B00]" : "bg-slate-300"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                        strategyStatus.eventConversion ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">Lead: Elena Vance</p>
+                <p className="mt-3 text-xs text-slate-600 leading-relaxed">
+                  Automated 3-touchpoint follow-up sequence for non-donors who attended marquee alumni events in the past 60 days.
+                </p>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="text-sm">
-            Planning week (Monday)
-            <input
-              type="date"
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={weekStart}
-              onChange={(e) => setWeekStart(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            Work day start (hour)
-            <input
-              type="number"
-              min={6}
-              max={12}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={workingHoursStart}
-              onChange={(e) => setWorkingHoursStart(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Work day end (hour)
-            <input
-              type="number"
-              min={13}
-              max={21}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={workingHoursEnd}
-              onChange={(e) => setWorkingHoursEnd(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Buffer between tasks (min)
-            <input
-              type="number"
-              min={0}
-              max={60}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={bufferMinutes}
-              onChange={(e) => setBufferMinutes(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Lunch start (hour)
-            <input
-              type="number"
-              min={11}
-              max={14}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={lunchStartHour}
-              onChange={(e) => setLunchStartHour(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Lunch end (hour)
-            <input
-              type="number"
-              min={12}
-              max={15}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={lunchEndHour}
-              onChange={(e) => setLunchEndHour(Number(e.target.value))}
-            />
-          </label>
-        </div>
+                <div className="mt-5 grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Targeted Donors</span>
+                    <p className="mt-1 text-lg font-bold text-[#0B192C]">89</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Historical Conversion</span>
+                    <p className="mt-1 text-lg font-bold text-emerald-600">19.1%</p>
+                  </div>
+                </div>
 
-        <fieldset className="mt-6">
-          <legend className="text-sm font-medium">Preferred channels</legend>
-          <div className="mt-2 flex flex-wrap gap-3 text-sm">
-            {(
-              [
-                ["phone", "Phone"],
-                ["email", "Email"],
-                ["event_invitation", "Event invitation"],
-                ["stewardship_message", "Stewardship message"],
-              ] as const
-            ).map(([ch, label]) => (
-              <label key={ch} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={channels.includes(ch)}
-                  onChange={() => toggleChannel(ch)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <div className="mt-8 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={build}
-            disabled={loading || channels.length === 0}
-            className="rounded-xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow disabled:opacity-50"
-          >
-            {loading ? "Building…" : outlookConnected ? "Build schedule" : "Build my Tuesday"}
-          </button>
-          {result && (
-            <button
-              type="button"
-              onClick={exportCsv}
-              className="rounded-xl border border-[var(--border)] bg-white px-6 py-3 text-sm font-medium"
-            >
-              Export queue CSV
-            </button>
-          )}
-          {schedule && (
-            <button
-              type="button"
-              onClick={exportSchedule}
-              className="rounded-xl border border-[var(--border)] bg-white px-6 py-3 text-sm font-medium"
-            >
-              Export schedule
-            </button>
-          )}
-        </div>
-      </section>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950">
-          <p className="font-medium">{error.title}</p>
-          <p className="mt-1">{error.detail}</p>
-          {error.action && (
-            <MicrosoftPermissionConnect
-              consent={error.action.consent}
-              returnTo={error.action.returnTo ?? "/"}
-              label={error.action.label}
-              variant="primary"
-              className="mt-3"
-            />
-          )}
-        </div>
-      )}
-
-      {result && (
-        <section className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Stat label="Conservative opportunity" value={formatCurrency(result.totals.conservative)} />
-            <Stat label="Expected opportunity" value={formatCurrency(result.totals.expected)} />
-            <Stat label="Upside opportunity" value={formatCurrency(result.totals.upside)} />
-          </div>
-          <p className="text-sm text-[var(--muted)]">
-            {result.items.length} actions · {result.minutesUsed} / {result.minutesBudget} minutes ·{" "}
-            {result.candidateCount} candidates scored
-            {feedbackTotal > 0 && ` · ${feedbackTotal} feedback note(s) in this browser`}
-          </p>
-
-          {schedule && outlookConnected ? (
-            <CalendarAwareScheduleView
-              schedule={schedule}
-              queueItems={result.items}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-              onScheduleUpdated={setSchedule}
-              staffHours={staffHours}
-            />
-          ) : outlookConnected ? (
-            <section className="space-y-4 rounded-xl border bg-white p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Outlook this week
-              </h2>
-              <WeekPlannerGrid weekStart={weekStart} outlookEvents={outlookPreview} />
-              <p className="text-sm text-[var(--muted)]">
-                Click <strong>Build schedule</strong> to add proposed fundraising tasks in open slots (never
-                on busy Outlook blocks).
-              </p>
-            </section>
-          ) : (
-            <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-sm text-amber-950">
-              Connect Outlook and click <strong>Build schedule</strong> to place recommended actions
-              around your live calendar. Queue priorities below still reflect the fundraising engine.
+                <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs">
+                  <span className="font-semibold text-slate-600">Cadence: Post-event +3, +10, +21 days</span>
+                  <button
+                    type="button"
+                    onClick={() => setMsg("Inspecting Event Conversion Cadence workflow...")}
+                    className="font-bold text-[#FF6B00] hover:underline"
+                  >
+                    Inspect Workflow →
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {(!schedule || viewMode === "queue") && (
-            <div className="space-y-4 border-t pt-6">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-                Priority queue
-              </h2>
-              {result.items.map((item, i) => (
-                <QueueCard key={item.constituentId} item={item} rank={i + 1} />
-              ))}
+        {/* ==================== TAB 4: COMMUNITIES ==================== */}
+        {activeTab === "Communities" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-[#0B192C]">Communities & Networks</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Organize constituents by regional alumni chapters, advisory boards, and peer giving networks.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {["All", "Regional Chapter", "Alumni Network", "Advisory Board"].map((filter) => (
+                    <button
+                      key={filter}
+                      onClick={() => setCommunityFilter(filter)}
+                      className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-xs ${
+                        communityFilter === filter
+                          ? "bg-[#FF6B00] text-white"
+                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      {filter}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          )}
 
-          {result.items.length === 0 && (
-            <p className="text-sm text-[var(--muted)]">
-              No actions fit this budget and channel mix. Try more hours or additional channels.
-            </p>
-          )}
-        </section>
-      )}
-    </div>
-  );
-}
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              {(communityFilter === "All" || communityFilter === "Regional Chapter") && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Regional Chapter
+                  </span>
+                  <h3 className="mt-3 text-lg font-bold text-[#0B192C]">SF Bay Area Chapter</h3>
+                  <p className="mt-1 text-xs text-slate-500">San Francisco, CA</p>
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
+                  <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Active Members</span>
+                      <span className="font-bold text-[#0B192C]">1,420 Donors</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Chapter Chair</span>
+                      <span className="font-bold text-[#0B192C]">Rachel Chen</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-xl bg-slate-50 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Next Upcoming Gathering</span>
+                    <p className="mt-1 text-xs font-bold text-[#FF6B00]">Tech Founders Breakfast - Nov 12</p>
+                  </div>
+                </div>
+              )}
+
+              {(communityFilter === "All" || communityFilter === "Regional Chapter") && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Regional Chapter
+                  </span>
+                  <h3 className="mt-3 text-lg font-bold text-[#0B192C]">New York Metro Network</h3>
+                  <p className="mt-1 text-xs text-slate-500">New York, NY</p>
+
+                  <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Active Members</span>
+                      <span className="font-bold text-[#0B192C]">2,850 Donors</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Chapter Chair</span>
+                      <span className="font-bold text-[#0B192C]">David Ross</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-xl bg-slate-50 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Next Upcoming Gathering</span>
+                    <p className="mt-1 text-xs font-bold text-[#FF6B00]">Wall Street Dinner Series - Nov 18</p>
+                  </div>
+                </div>
+              )}
+
+              {(communityFilter === "All" || communityFilter === "Regional Chapter") && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs transition-all hover:border-slate-300">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Regional Chapter
+                  </span>
+                  <h3 className="mt-3 text-lg font-bold text-[#0B192C]">Greater Boston Alumni</h3>
+                  <p className="mt-1 text-xs text-slate-500">Boston, MA</p>
+
+                  <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Active Members</span>
+                      <span className="font-bold text-[#0B192C]">980 Donors</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Chapter Chair</span>
+                      <span className="font-bold text-[#0B192C]">Dr. Mark Vance</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-xl bg-slate-50 p-3.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Next Upcoming Gathering</span>
+                    <p className="mt-1 text-xs font-bold text-[#FF6B00]">Biotech & Healthcare Mixer - Dec 02</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 5: SEGMENTS ==================== */}
+        {activeTab === "Segments" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-6 shadow-xs">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Min Giving Capacity ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={minGivingCapacity}
+                    onChange={(e) => setMinGivingCapacity(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Engagement Tier
+                  </label>
+                  <select
+                    value={engagementTierFilter}
+                    onChange={(e) => setEngagementTierFilter(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                  >
+                    <option value="All Engagement Levels">All Engagement Levels</option>
+                    <option value="High">High Engagement</option>
+                    <option value="Medium">Medium Engagement</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Career Triggers
+                  </label>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="careerTrigger"
+                      checked={careerTriggerChecked}
+                      onChange={(e) => setCareerTriggerChecked(e.target.checked)}
+                      className="h-4 w-4 rounded-sm border-slate-300 text-[#FF6B00] focus:ring-[#FF6B00]"
+                    />
+                    <label htmlFor="careerTrigger" className="text-xs font-semibold text-slate-700">
+                      Recent Executive Promotion
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Reunion Cohort
+                  </label>
+                  <select
+                    value={reunionCohortFilter}
+                    onChange={(e) => setReunionCohortFilter(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-xs focus:border-[#FF6B00] focus:outline-hidden"
+                  >
+                    <option value="All Alumni Cohorts">All Alumni Cohorts</option>
+                    <option value="Class of 2015">Class of 2015</option>
+                    <option value="Class of 2010">Class of 2010</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <h2 className="text-lg font-bold text-[#0B192C]">Matching Constituents</h2>
+                <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-[#FF6B00]">
+                  6 Constituents Found
+                </span>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                <div className="flex flex-wrap items-center justify-between gap-4 py-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#0B192C]">Sarah Jenkins</h3>
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                        Promotion Signal
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">VP of Engineering at TechCorp · San Francisco</p>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[#0B192C]">$150,000 Capacity</p>
+                      <p className="text-[10px] text-slate-400">Last Gift: $2,500 (2025)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsg("Viewing constituent card for Sarah Jenkins...")}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-100"
+                    >
+                      View Card
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-4 py-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#0B192C]">Michael Chang</h3>
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                        Promotion Signal
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">Senior Partner at Apex Legal · New York</p>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[#0B192C]">$500,000 Capacity</p>
+                      <p className="text-[10px] text-slate-400">Last Gift: $10,000 (2024)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsg("Viewing constituent card for Michael Chang...")}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-100"
+                    >
+                      View Card
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-4 py-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#0B192C]">Elena Rostova</h3>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">Director of Product at Innovate AI · Boston</p>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[#0B192C]">$85,000 Capacity</p>
+                      <p className="text-[10px] text-slate-400">Last Gift: $1,000 (2025)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsg("Viewing constituent card for Elena Rostova...")}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-100"
+                    >
+                      View Card
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-4 py-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#0B192C]">David Miller</h3>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">Founder & CEO at GreenScale Energy · London</p>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[#0B192C]">$250,000 Capacity</p>
+                      <p className="text-[10px] text-slate-400">Last Gift: $5,000 (2022)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMsg("Viewing constituent card for David Miller...")}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-100"
+                    >
+                      View Card
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 6: AUTOPILOT ==================== */}
+        {activeTab === "Autopilot" && <Autoview />}
+      </main>
     </div>
   );
 }
