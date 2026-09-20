@@ -237,7 +237,7 @@ export function OutlookConnectionCard({
           <a href="https://outlook.live.com/mail/" className="font-medium underline" target="_blank" rel="noreferrer">
             outlook.com
           </a>
-          . When Microsoft asks, choose <strong>Allow</strong> so Tuesday can see when you’re free. Not sure which
+          . When Microsoft asks, choose <strong>Allow</strong> so DonoRex can see when you’re free. Not sure which
           type you use? Try personal first (most @outlook.com and @hotmail.com accounts).
         </p>
         {status.configurationError ? (
@@ -345,7 +345,7 @@ export function OutlookConnectionCard({
         </div>
         <p className="mt-3 text-xs text-amber-900">
           Tip: Use the same account you open in Outlook on the web. Guest or shared work sign-ins often don’t include a
-          calendar Tuesday can use.
+          calendar DonoRex can use.
         </p>
         {permissionError && (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">

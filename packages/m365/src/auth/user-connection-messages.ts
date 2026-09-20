@@ -2,7 +2,7 @@ export type ConnectionArea = "profile" | "calendar" | "mail";
 
 export const CONNECTION_COPY = {
   notConnected:
-    "Connect your Microsoft Outlook account to see your calendar here and send email from Tuesday.",
+    "Connect your Microsoft Outlook account to see your calendar here and send email from DonoRex.",
   calendarOk: "Your Outlook calendar is connected. Times and availability come from your live calendar.",
   mailOk: "Your Outlook email is connected. You can draft and approve messages in Autopilot.",
   calendarPending:
@@ -13,9 +13,9 @@ export const CONNECTION_COPY = {
   signInExpired:
     "Your Microsoft sign-in expired. Click Disconnect, then connect again and sign in with the same account you use in Outlook.",
   adminNeeded:
-    "Your organization requires an IT administrator to approve Tuesday for Microsoft Outlook. Ask your admin for help, then try connecting again.",
+    "Your organization requires an IT administrator to approve DonoRex for Microsoft Outlook. Ask your admin for help, then try connecting again.",
   setupMissing:
-    "Tuesday isn't set up for Microsoft sign-in yet. If someone else runs this app for you, ask them to finish setup.",
+    "DonoRex isn't set up for Microsoft sign-in yet. If someone else runs this app for you, ask them to finish setup.",
 } as const;
 
 export function graphFailureMessage(

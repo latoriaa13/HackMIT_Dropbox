@@ -34,8 +34,15 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Constituent overview</h1>
-      <p className="text-[var(--muted)]">{meta.schoolName} · FY{meta.currentFiscalYear} planning</p>
+      <div className="donorex-panel rounded-2xl p-8 text-center shadow-xs">
+        <h1 className="text-3xl font-bold tracking-tight text-[var(--donorex-navy)]">
+          Overview Dashboard
+        </h1>
+        <p className="mt-2 text-sm text-slate-600">
+          {meta.schoolName} · FY{meta.currentFiscalYear} planning — constituent counts and pipeline
+          health.
+        </p>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label="Constituents" value={meta.constituentCount.toLocaleString()} />
         <Tile label="Ever donors" value={meta.donorCount.toLocaleString()} />
@@ -59,9 +66,9 @@ function Tile({
   hint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <p className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</p>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
+      <p className="mt-2 text-3xl font-extrabold text-[var(--donorex-navy)]">{value}</p>
       {hint && <p className="mt-1 text-xs text-[var(--muted)]">{hint}</p>}
     </div>
   );

@@ -1,6 +1,6 @@
-# Tuesday
+# DonoRex
 
-**Tuesday** helps advancement teams decide where to spend limited time: who to contact this week, what to do, and why.
+**DonoRex** helps advancement teams decide where to spend limited time: who to contact this week, what to do, and why.
 
 Built for the GiveCampus Challenge (HackMIT).
 

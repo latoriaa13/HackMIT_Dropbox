@@ -49,7 +49,7 @@ export function buildWeekGrid(input: {
       start: ev.start,
       end: ev.end,
       label: `${formatTimeRangeInZone(ev.start, ev.end, zone)} · ${blocking ? "Busy" : "Outlook"} · ${outlookEventDisplayLabel(ev)}`,
-      detail: blocking ? "Not available for Tuesday task placement" : "Shown for context — does not block scheduling",
+      detail: blocking ? "Not available for fundraising task placement" : "Shown for context — does not block scheduling",
     });
   }
 

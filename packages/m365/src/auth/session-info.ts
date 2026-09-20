@@ -30,7 +30,7 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
       oauthConfigured: false,
       canStartOAuth: false,
       configurationError: true,
-      message: "Tuesday isn't set up for Microsoft sign-in yet.",
+      message: "DonoRex isn't set up for Microsoft sign-in yet.",
       connectUrl:
         "/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot",
     };
@@ -45,7 +45,7 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
       oauthConfigured,
       canStartOAuth: true,
       configErrors: configErrors.length ? configErrors : undefined,
-      message: "Connect Microsoft Outlook to see your calendar and send email from Tuesday.",
+      message: "Connect Microsoft Outlook to see your calendar and send email from DonoRex.",
       connectUrl:
         "/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot",
     };

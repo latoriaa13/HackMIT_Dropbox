@@ -1,49 +1,32 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import { AppNav } from "@/components/AppNav";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Tuesday — Advancement action planner",
+  title: "DonoRex — Advancement action planner",
   description: "Where should your gift officers spend limited time this week?",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased">
-        <header className="border-b border-[var(--border)] bg-[var(--surface)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
-            <Link href="/" className="flex flex-col">
-              <span className="text-xl font-semibold tracking-tight text-[var(--accent)]">
-                Tuesday
-              </span>
-              <span className="text-xs text-[var(--muted)]">
-                Spend limited time where it matters
-              </span>
-            </Link>
-            <nav className="flex flex-wrap gap-4 text-sm font-medium">
-              <Link href="/" className="hover:text-[var(--accent)]">
-                Weekly plan
-              </Link>
-              <Link href="/overview" className="hover:text-[var(--accent)]">
-                Overview
-              </Link>
-              <Link href="/strategies" className="hover:text-[var(--accent)]">
-                Strategies
-              </Link>
-              <Link href="/communities" className="hover:text-[var(--accent)]">
-                Communities
-              </Link>
-              <Link href="/segments" className="hover:text-[var(--accent)]">
-                Segments
-              </Link>
-              <Link href="/autopilot" className="hover:text-[var(--accent)]">
-                Autopilot
-              </Link>
-            </nav>
-          </div>
+      <body className={`${inter.variable} min-h-screen bg-white font-sans text-slate-800 antialiased`}>
+        <header className="w-full border-b border-slate-100 bg-white py-5 text-center shadow-xs">
+          <Link href="/" className="inline-block">
+            <span className="text-4xl font-extrabold tracking-wide text-[var(--donorex-orange)]">
+              DonoRex
+            </span>
+            <span className="mt-1 block text-xs font-medium text-slate-500">
+              Spend limited time where it matters
+            </span>
+          </Link>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+        <AppNav />
+        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">{children}</main>
       </body>
     </html>
   );

@@ -72,14 +72,14 @@ export function CalendarAwareScheduleView({
   return (
     <div className="space-y-6">
       <div className="rounded-xl border bg-white p-4 text-sm">
-        <p className="font-medium">Tuesday plan · {schedule.weekStart} – {schedule.weekEnd}</p>
+        <p className="font-medium">Weekly plan · {schedule.weekStart} – {schedule.weekEnd}</p>
         <p className="mt-1 text-[var(--muted)]">
           {staffHours}h fundraising budget · {schedule.preferences.workDays}-day week,{" "}
           {schedule.preferences.workingHoursStart}:00–{schedule.preferences.workingHoursEnd}:00 (
           {schedule.preferences.workDays *
             (schedule.preferences.workingHoursEnd - schedule.preferences.workingHoursStart)}
           h capacity before Outlook). Outlook shows {schedule.summary.outlookMeetingCount} meetings and{" "}
-          {Math.round(schedule.summary.totalAvailableWorkMinutes / 60)}h open for tasks. Tuesday found{" "}
+          {Math.round(schedule.summary.totalAvailableWorkMinutes / 60)}h open for tasks. DonoRex found{" "}
           {schedule.summary.tasksProposed} recommended actions.
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

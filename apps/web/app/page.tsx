@@ -170,7 +170,11 @@ export default function WeeklyPlanPage() {
       }
       setFeedbackTotal(feedbackCount());
     } catch (e) {
-      setError({ title: "Build failed", detail: e instanceof Error ? e.message : "Build failed" });
+      setError({
+        title: "Build failed",
+        detail: e instanceof Error ? e.message : "Build failed",
+        severity: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -238,8 +242,8 @@ export default function WeeklyPlanPage() {
         onCalendarSynced={() => void syncOutlookPreview()}
       />
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">Build my Tuesday</h1>
+      <section className="donorex-panel rounded-2xl p-6 shadow-xs">
+        <h1 className="text-2xl font-bold tracking-tight text-[var(--donorex-navy)]">Build my week</h1>
         <p className="mt-2 max-w-2xl text-[var(--muted)]">
           {schoolName ? `${schoolName} — ` : ""}
           Prioritize fundraising work against your real Outlook availability when connected. Planning
@@ -403,9 +407,9 @@ export default function WeeklyPlanPage() {
             type="button"
             onClick={build}
             disabled={loading || channels.length === 0}
-            className="rounded-xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-white shadow disabled:opacity-50"
+            className="donorex-btn-primary px-6 py-3 text-sm shadow-xs disabled:opacity-50"
           >
-            {loading ? "Building…" : outlookConnected ? "Build schedule" : "Build my Tuesday"}
+            {loading ? "Building…" : outlookConnected ? "Build schedule" : "Build my week"}
           </button>
           {result && (
             <button

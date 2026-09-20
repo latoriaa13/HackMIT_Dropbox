@@ -1,18 +1,61 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #faf8f5;
+  --donorex-orange: #ff6b00;
+  --donorex-orange-hover: #e56000;
+  --donorex-navy: #0b192c;
+  --bg: #ffffff;
   --surface: #ffffff;
-  --ink: #1c1917;
-  --muted: #78716c;
-  --accent: #b45309;
-  --accent-soft: #fef3c7;
-  --border: #e7e5e4;
+  --ink: #0b192c;
+  --muted: #64748b;
+  --accent: #ff6b00;
+  --accent-soft: #fff7ed;
+  --border: #e2e8f0;
   --success: #166534;
+  --panel: #f8fafc;
 }
 
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-inter, "Inter"), system-ui, sans-serif;
+}
+
+.shadow-xs {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+}
+
+.donorex-panel {
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 50%, white);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+}
+
+.donorex-btn-primary {
+  border-radius: 0.75rem;
+  background: var(--donorex-orange);
+  color: white;
+  font-weight: 700;
+  transition: background 0.15s ease;
+}
+
+.donorex-btn-primary:hover:not(:disabled) {
+  background: var(--donorex-orange-hover);
+}
+
+.donorex-btn-primary:disabled {
+  opacity: 0.5;
+}
+
+.donorex-input {
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: white;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
+}
+
+.donorex-input:focus {
+  border-color: var(--donorex-orange);
+  outline: none;
 }

@@ -6,7 +6,7 @@ import { recordConstituentActivity } from "../storage/constituent-activity";
 import { getUserSchedule, saveUserSchedule } from "../storage/schedule-store";
 
 function eventSubject(task: SchedulableFundraisingTask): string {
-  return `Tuesday: ${ACTION_LABELS[task.actionType]} — ${task.constituentName}`;
+  return `DonoRex: ${ACTION_LABELS[task.actionType]} — ${task.constituentName}`;
 }
 
 function eventBody(task: SchedulableFundraisingTask, appUrl: string): string {

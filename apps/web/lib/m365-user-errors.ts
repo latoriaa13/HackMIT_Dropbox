@@ -73,7 +73,7 @@ export function formatM365UserError(
           title: "Calendar access needed",
           detail:
             detailText ||
-            "Tuesday needs permission to view your Outlook calendar. Click Connect calendar and choose Allow when Microsoft asks.",
+            "DonoRex needs permission to view your Outlook calendar. Click Connect calendar and choose Allow when Microsoft asks.",
           action: { label: "Connect calendar", consent: "calendar", returnTo: "/" },
           severity: "error",
         };
@@ -82,7 +82,7 @@ export function formatM365UserError(
         return {
           title: "Email access needed",
           detail:
-            "Tuesday needs permission to use your Outlook email. Open Autopilot, click Connect mail, and choose Allow when Microsoft asks.",
+            "DonoRex needs permission to use your Outlook email. Open Autopilot, click Connect mail, and choose Allow when Microsoft asks.",
           action: { label: "Connect mail", consent: "mail", returnTo: "/autopilot" },
           severity: "error",
         };
@@ -100,7 +100,7 @@ export function formatM365UserError(
       return {
         title: "Sign-in not available",
         detail:
-          "Tuesday isn't set up for Microsoft sign-in on this copy of the app yet. Ask whoever manages Tuesday to finish setup.",
+          "DonoRex isn't set up for Microsoft sign-in on this copy of the app yet. Ask whoever manages DonoRex to finish setup.",
         severity: "error",
       };
     default:

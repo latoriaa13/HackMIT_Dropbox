@@ -205,7 +205,7 @@ export default function AutopilotPage() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-2xl font-semibold">Tuesday Autopilot</h1>
+        <h1 className="text-2xl font-bold text-[var(--donorex-navy)]">DonoRex Autopilot</h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
           Prepare outreach through your Outlook email and calendar. Every send and meeting invitation needs your
           approval in the inbox below.
@@ -234,7 +234,7 @@ export default function AutopilotPage() {
             {status.message && <p className="text-amber-800">{status.message}</p>}
             {status.configurationError && (
               <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-900">
-                Microsoft sign-in isn’t set up for this app yet. Ask whoever manages Tuesday to finish setup.
+                Microsoft sign-in isn’t set up for this app yet. Ask whoever manages DonoRex to finish setup.
               </p>
             )}
             {!status.configurationError && !status.connected && (

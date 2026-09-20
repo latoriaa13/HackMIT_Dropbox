@@ -26,7 +26,7 @@ export function ensureDemoThankYouEmailDraft(userId: string) {
     "Thank you for your continued generosity and for taking time to engage with our advancement team this week.",
     "Your support helps us prioritize student-facing programs and stewardship that donors can see and trust.",
     "",
-    "This message is a demo draft in Tuesday Autopilot — approve it below to send through your connected Microsoft 365 mailbox.",
+    "This message is a demo draft in DonoRex Autopilot — approve it below to send through your connected Microsoft 365 mailbox.",
     "",
     "With gratitude,",
     "Your GiveCampus University advancement team",

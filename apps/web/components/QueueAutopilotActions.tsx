@@ -202,7 +202,7 @@ export function QueueAutopilotActions({
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
                         constituentId: item.constituentId,
-                        subject: `Tuesday: ${item.constituentName} — ${item.recommendedAction.replace(/_/g, " ")}`,
+                        subject: `DonoRex: ${item.constituentName} — ${item.recommendedAction.replace(/_/g, " ")}`,
                         start: s.start,
                         end: s.end,
                         timezone: "America/New_York",

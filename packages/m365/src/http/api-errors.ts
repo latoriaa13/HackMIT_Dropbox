@@ -17,7 +17,7 @@ export class Microsoft365NotConnectedError extends Error {
 export class Microsoft365ConfigurationError extends Error {
   readonly code = "MICROSOFT365_CONFIGURATION_ERROR" as const;
 
-  constructor(message = "Tuesday isn't set up for Microsoft sign-in yet.") {
+  constructor(message = "DonoRex isn't set up for Microsoft sign-in yet.") {
     super(message);
     this.name = "Microsoft365ConfigurationError";
   }

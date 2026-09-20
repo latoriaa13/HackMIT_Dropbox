@@ -32,7 +32,7 @@ describe("schedule task approval", () => {
     const createEventDraft = vi.fn().mockResolvedValue({
       draftId: "draft-1",
       approvalToken: "tok",
-      subject: "Tuesday",
+      subject: "DonoRex",
       start: task.suggestedStart!,
       end: task.suggestedEnd!,
       timezone: "America/New_York",

@@ -1,11 +1,11 @@
 const ERROR_HINTS: Record<string, string> = {
   not_configured:
-    "Tuesday isn't set up for Microsoft sign-in yet. Ask whoever runs this app to finish setup, then try again.",
+    "DonoRex isn't set up for Microsoft sign-in yet. Ask whoever runs this app to finish setup, then try again.",
   oauth_cancelled: "Sign-in was cancelled. Click Connect when you're ready to try again.",
   oauth_denied: "Microsoft didn't approve the sign-in. Try again and choose Allow on each screen.",
   invalid_oauth_state: "That sign-in took too long. Please click Connect and try again.",
   oauth_invalid_client:
-    "We couldn't finish signing you in. Ask whoever manages Tuesday to check the Microsoft app settings, then try Connect again.",
+    "We couldn't finish signing you in. Ask whoever manages DonoRex to check the Microsoft app settings, then try Connect again.",
   oauth_token_exchange_failed:
     "We couldn't finish signing you in. Wait a moment, then click Connect and sign in with your Outlook account again.",
   calendar_connected:
