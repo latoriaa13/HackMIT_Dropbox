@@ -8,8 +8,9 @@ export function assertCalendarAccess(userId: string) {
     throw new Microsoft365NotConnectedError();
   }
   if (!hasCalendarScopes(account.grantedScopes)) {
-    throw new Microsoft365PermissionError("Calendar permission required — reconnect with calendar access.", [
-      "Calendars.Read",
-    ]);
+    throw new Microsoft365PermissionError(
+      "Please connect your Outlook calendar first (use Connect calendar on the home page).",
+      ["Calendars.Read"]
+    );
   }
 }

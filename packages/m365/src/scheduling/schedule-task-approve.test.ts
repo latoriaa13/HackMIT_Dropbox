@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SchedulableFundraisingTask } from "@tuesday/core";
-import { applyTaskApproval, applyTaskDenial, approveScheduleTaskDraft } from "./schedule-task-approve";
+import {
+  applyTaskApproval,
+  applyTaskComplete,
+  applyTaskDenial,
+  approveScheduleTaskDraft,
+} from "./schedule-task-approve";
 import type { Microsoft365Provider } from "../provider/interface";
 
 const task: SchedulableFundraisingTask = {
@@ -61,5 +66,14 @@ describe("schedule task approval", () => {
     const updated = applyTaskApproval(schedule, task.id, "draft-99");
     expect(updated.tasks[0].schedulingStatus).toBe("approved");
     expect(updated.tasks[0].outlookDraftId).toBe("draft-99");
+  });
+
+  it("complete marks task completed", () => {
+    const schedule = {
+      tasks: [{ ...task, schedulingStatus: "approved" as const }],
+      timeline: [],
+    } as never;
+    const updated = applyTaskComplete(schedule, task.id);
+    expect(updated.tasks[0].schedulingStatus).toBe("completed");
   });
 });

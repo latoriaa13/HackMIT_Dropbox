@@ -4,6 +4,8 @@ import {
   appendAudit,
   getEmailDraft,
   getEventDraft,
+  removeEmailDraft,
+  removeEventDraft,
   requireMicrosoft365Provider,
   recordConstituentActivity,
 } from "@tuesday/m365";
@@ -23,6 +25,8 @@ export async function POST(request: Request) {
     const body = Schema.parse(await request.json());
 
     if (body.decision === "reject") {
+      if (body.kind === "email") removeEmailDraft(body.draftId);
+      else removeEventDraft(body.draftId);
       appendAudit({
         userId,
         actionType: body.kind === "email" ? "mail.send_draft" : "calendar.send_event_invitation",
@@ -30,7 +34,7 @@ export async function POST(request: Request) {
         status: "rejected",
         payloadSummary: "User rejected in approval inbox",
       });
-      return NextResponse.json({ ok: true, status: "rejected" });
+      return NextResponse.json({ ok: true, status: "rejected", message: "Draft removed." });
     }
 
     const provider = requireMicrosoft365Provider(userId);

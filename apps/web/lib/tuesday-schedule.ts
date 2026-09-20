@@ -15,6 +15,7 @@ import {
   saveUserSchedule,
   requireMicrosoft365Provider,
   assertCalendarAccess,
+  getOutlookTimeZoneContext,
 } from "@tuesday/m365";
 import { loadDataset } from "@/lib/data-store";
 import { z } from "zod";
@@ -43,44 +44,69 @@ export async function buildAndStoreSchedule(userId: string, body: z.infer<typeof
   const dataset = loadDataset();
   const queueResult = buildTuesday(dataset, buildInput as BuildTuesdayInput);
   const provider = requireMicrosoft365Provider(userId);
-  const { events, syncedAt, weekStart: ws, weekEnd } = await fetchAndCacheCalendarWeek(userId, provider, {
+  const { iana: outlookIana } = await getOutlookTimeZoneContext(userId, timezone);
+  const calendarWeek = await fetchAndCacheCalendarWeek(userId, provider, {
     weekStart,
-    timezone: timezone ?? DEFAULT_SCHEDULING_PREFERENCES.timezone,
+    timezone: outlookIana,
   });
+  const { events, syncedAt, weekStart: ws, weekEnd } = calendarWeek;
   const schedule = buildCalendarAwareSchedule({
     queueItems: queueResult.items,
     outlookEvents: calendarEventsToBusyBlocks(events),
     weekStart: ws,
     preferences: {
       ...DEFAULT_SCHEDULING_PREFERENCES,
-      timezone: timezone ?? DEFAULT_SCHEDULING_PREFERENCES.timezone,
+      timezone: outlookIana,
       ...preferences,
     },
     generatedAt: new Date().toISOString(),
   });
   saveUserSchedule(userId, schedule);
-  return { schedule, queueResult, calendarSync: { syncedAt, weekStart: ws, weekEnd } };
+  return {
+    schedule,
+    queueResult,
+    calendarSync: {
+      syncedAt,
+      weekStart: ws,
+      weekEnd,
+      usedFallbackCache:
+        "usedFallbackCache" in calendarWeek ? calendarWeek.usedFallbackCache : undefined,
+    },
+  };
 }
 
-export async function refreshCalendarAndSchedule(userId: string) {
+export async function refreshCalendarAndSchedule(userId: string, options?: { weekStart?: string }) {
   assertCalendarAccess(userId);
   const existing = getUserSchedule(userId);
   const provider = requireMicrosoft365Provider(userId);
   const cached = getCachedCalendarWeek(userId);
-  const weekStart = cached?.weekStart ?? existing?.weekStart;
-  const { events, syncedAt } = await fetchAndCacheCalendarWeek(userId, provider, {
-    weekStart,
-    timezone: cached?.timezone ?? DEFAULT_SCHEDULING_PREFERENCES.timezone,
-  });
+  const weekStart = options?.weekStart ?? existing?.weekStart ?? cached?.weekStart;
+  const { iana: outlookIana } = await getOutlookTimeZoneContext(userId, cached?.timezone);
+  const { events, syncedAt, weekStart: ws, weekEnd, eventCount } = await fetchAndCacheCalendarWeek(
+    userId,
+    provider,
+    {
+      weekStart,
+      timezone: outlookIana,
+    }
+  );
   if (!existing) {
-    return { schedule: null, calendarSync: { syncedAt } };
+    return {
+      schedule: null,
+      outlookEvents: calendarEventsToBusyBlocks(events),
+      calendarSync: { syncedAt, weekStart: ws, weekEnd, eventCount },
+    };
   }
   const refreshed = detectScheduleConflictsAfterRefresh(
     existing,
     calendarEventsToBusyBlocks(events)
   );
   saveUserSchedule(userId, refreshed);
-  return { schedule: refreshed, calendarSync: { syncedAt } };
+  return {
+    schedule: refreshed,
+    outlookEvents: calendarEventsToBusyBlocks(events),
+    calendarSync: { syncedAt, weekStart: ws, weekEnd, eventCount },
+  };
 }
 
 export { getUserSchedule, rescheduleTaskInPlan, getCachedCalendarWeek };

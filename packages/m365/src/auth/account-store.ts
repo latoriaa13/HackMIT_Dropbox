@@ -1,4 +1,5 @@
 import { microsoftAccountsPath, readJsonFile, writeJsonFile } from "../storage/json-store";
+import { relinkDevMicrosoftSession } from "./dev-session-relink";
 
 export type MicrosoftAccountLink = {
   sessionUserId: string;
@@ -10,6 +11,8 @@ export type MicrosoftAccountLink = {
   authAuthoritySegment?: string;
   grantedScopes: string[];
   connectedAt: string;
+  /** Outlook mailbox timezone (Windows name from Graph mailboxSettings). */
+  outlookTimeZone?: string;
 };
 
 type AccountFile = Record<string, MicrosoftAccountLink>;
@@ -23,7 +26,9 @@ function save(data: AccountFile) {
 }
 
 export function getMicrosoftAccount(sessionUserId: string): MicrosoftAccountLink | null {
-  return load()[sessionUserId] ?? null;
+  const direct = load()[sessionUserId];
+  if (direct) return direct;
+  return relinkDevMicrosoftSession(sessionUserId);
 }
 
 export function saveMicrosoftAccount(link: MicrosoftAccountLink) {

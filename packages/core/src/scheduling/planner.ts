@@ -12,8 +12,15 @@ import type {
   SchedulableFundraisingTask,
   ScheduleSummary,
 } from "./types";
-import { isoDate, parseWeekStart, weekRangeFromStart } from "./week-utils";
+import { DateTime } from "luxon";
 import { isBlockingOutlookEvent, outlookEventDisplayLabel } from "./outlook-busy";
+import {
+  assertIanaZone,
+  hourInZone,
+  parseWeekStartInZone,
+  utcIsoToDateKey,
+  weekRangeFromStartInZone,
+} from "./timezone";
 
 type TimeInterval = { startMs: number; endMs: number };
 
@@ -54,22 +61,40 @@ function subtractBusy(free: TimeInterval[], busy: TimeInterval[]): TimeInterval[
   return slots.filter((s) => s.endMs - s.startMs >= 5 * 60_000);
 }
 
-function dayWorkWindow(
-  day: Date,
-  prefs: SchedulingPreferences
-): TimeInterval[] {
-  const start = new Date(day);
-  start.setHours(prefs.workingHoursStart, 0, 0, 0);
-  const end = new Date(day);
-  end.setHours(prefs.workingHoursEnd, 0, 0, 0);
-  const lunchStart = new Date(day);
-  lunchStart.setHours(prefs.lunchStartHour, 0, 0, 0);
-  const lunchEnd = new Date(day);
-  lunchEnd.setHours(prefs.lunchEndHour, 0, 0, 0);
-  return subtractBusy(
-    [{ startMs: start.getTime(), endMs: end.getTime() }],
-    [{ startMs: lunchStart.getTime(), endMs: lunchEnd.getTime() }]
-  );
+function dayWorkWindow(day: DateTime, prefs: SchedulingPreferences): TimeInterval[] {
+  const start = day.set({
+    hour: prefs.workingHoursStart,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  const end = day.set({
+    hour: prefs.workingHoursEnd,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  const lunchStart = day.set({
+    hour: prefs.lunchStartHour,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  const lunchEnd = day.set({
+    hour: prefs.lunchEndHour,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  const work: TimeInterval[] = [
+    { startMs: start.toUTC().toMillis(), endMs: end.toUTC().toMillis() },
+  ];
+  if (prefs.lunchEndHour > prefs.lunchStartHour) {
+    return subtractBusy(work, [
+      { startMs: lunchStart.toUTC().toMillis(), endMs: lunchEnd.toUTC().toMillis() },
+    ]);
+  }
+  return work;
 }
 
 function scoreSlotForTask(
@@ -77,7 +102,7 @@ function scoreSlotForTask(
   task: SchedulableFundraisingTask,
   prefs: SchedulingPreferences
 ): number {
-  const hour = new Date(slotStart).getHours();
+  const hour = hourInZone(slotStart, prefs.timezone);
   let score = task.priority;
   if (task.preferredTimeOfDay === "morning" && hour < 12) score += 20;
   if (task.preferredTimeOfDay === "afternoon" && hour >= prefs.lunchEndHour) score += 20;
@@ -96,8 +121,9 @@ export function buildCalendarAwareSchedule(input: {
   generatedAt?: string;
 }): CalendarAwareSchedule {
   const prefs: SchedulingPreferences = { ...DEFAULT_SCHEDULING_PREFERENCES, ...input.preferences };
-  const weekStartDate = parseWeekStart(input.weekStart);
-  const { weekStart, weekEnd } = weekRangeFromStart(weekStartDate, prefs.workDays);
+  const zone = assertIanaZone(prefs.timezone);
+  const weekStartMonday = parseWeekStartInZone(input.weekStart, zone);
+  const { weekStart, weekEnd } = weekRangeFromStartInZone(weekStartMonday, prefs.workDays);
   const tasks = queueItemsToSchedulableTasks(input.queueItems);
 
   const timeline: ScheduleTimelineEntry[] = [];
@@ -106,7 +132,7 @@ export function buildCalendarAwareSchedule(input: {
   const blockingEvents = input.outlookEvents.filter(isBlockingOutlookEvent);
 
   for (const ev of input.outlookEvents) {
-    const day = ev.start.slice(0, 10);
+    const day = utcIsoToDateKey(ev.start, zone);
     if (!busyByDay.has(day)) busyByDay.set(day, []);
     busyByDay.get(day)!.push(ev);
     const blocking = isBlockingOutlookEvent(ev);
@@ -137,9 +163,8 @@ export function buildCalendarAwareSchedule(input: {
 
   const freeSlotsByDay: TimeInterval[][] = [];
   for (let d = 0; d < prefs.workDays; d++) {
-    const day = new Date(weekStartDate);
-    day.setDate(day.getDate() + d);
-    const dayKey = isoDate(day);
+    const day = weekStartMonday.plus({ days: d }).startOf("day");
+    const dayKey = day.toISODate()!;
 
     let freeSlots = dayWorkWindow(day, prefs);
     const dayBusy = (busyByDay.get(dayKey) ?? []).map((ev) => ({
@@ -149,7 +174,7 @@ export function buildCalendarAwareSchedule(input: {
     freeSlots = subtractBusy(
       freeSlots,
       mergeIntervals([
-        ...placedBusy.filter((b) => isoDate(new Date(b.startMs)) === dayKey),
+        ...placedBusy.filter((b) => utcIsoToDateKey(new Date(b.startMs).toISOString(), zone) === dayKey),
         ...dayBusy,
       ])
     );
@@ -214,7 +239,7 @@ export function buildCalendarAwareSchedule(input: {
     timeline.push({
       id: task.id,
       kind: "fundraising_task",
-      date: new Date(best.startMs).toISOString().slice(0, 10),
+      date: utcIsoToDateKey(task.suggestedStart!, zone),
       start: task.suggestedStart,
       end: task.suggestedEnd,
       label: task.title,
@@ -225,17 +250,20 @@ export function buildCalendarAwareSchedule(input: {
     availableFundraisingMinutes -= task.estimatedMinutes + prefs.bufferBetweenTasksMinutes;
   }
 
-  const reserveEnd = new Date(weekStartDate);
-  reserveEnd.setDate(reserveEnd.getDate() + prefs.workDays - 1);
-  reserveEnd.setHours(prefs.workingHoursEnd, 0, 0, 0);
-  const reserveStart = new Date(reserveEnd);
-  reserveStart.setMinutes(reserveStart.getMinutes() - prefs.reserveBufferMinutes);
+  const reserveDay = weekStartMonday.plus({ days: prefs.workDays - 1 }).startOf("day");
+  const reserveEnd = reserveDay.set({
+    hour: prefs.workingHoursEnd,
+    minute: 0,
+    second: 0,
+    millisecond: 0,
+  });
+  const reserveStart = reserveEnd.minus({ minutes: prefs.reserveBufferMinutes });
   timeline.push({
     id: "buffer-reserve",
     kind: "buffer",
-    date: isoDate(reserveEnd),
-    start: reserveStart.toISOString(),
-    end: reserveEnd.toISOString(),
+    date: reserveDay.toISODate()!,
+    start: reserveStart.toUTC().toISO()!,
+    end: reserveEnd.toUTC().toISO()!,
     label: "Buffer / unscheduled follow-up",
   });
 
@@ -275,7 +303,7 @@ function explainWhyThisTime(
   startMs: number,
   prefs: SchedulingPreferences
 ): string {
-  const hour = new Date(startMs).getHours();
+  const hour = hourInZone(startMs, prefs.timezone);
   const parts: string[] = ["Fits an open block on your Outlook calendar."];
   if (task.preferredTimeOfDay === "morning" && hour < 12) {
     parts.push("Morning slot preferred for live outreach.");
@@ -323,7 +351,7 @@ export function rescheduleTaskInPlan(
   timeline.push({
     id: taskId,
     kind: conflict ? "conflict" : "fundraising_task",
-    date: newStart.slice(0, 10),
+    date: utcIsoToDateKey(newStart, schedule.timezone),
     start: newStart,
     end: newEnd,
     label: task.title,

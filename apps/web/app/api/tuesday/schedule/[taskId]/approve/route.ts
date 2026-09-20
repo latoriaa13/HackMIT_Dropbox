@@ -30,7 +30,7 @@ export async function POST(_request: Request, { params }: Params) {
     }
     const provider = requireMicrosoft365Provider(userId);
     const appBase = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const draft = await approveScheduleTaskDraft(provider, userId, task, appBase);
+    const draft = await approveScheduleTaskDraft(provider, userId, task, appBase, schedule.timezone);
     const updated = applyTaskApproval(schedule, taskId, draft.draftId);
     saveUserSchedule(userId, updated);
     return NextResponse.json({

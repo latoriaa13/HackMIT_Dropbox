@@ -1,5 +1,13 @@
 import type { CalendarAwareSchedule, OutlookBusyBlock, SchedulableFundraisingTask } from "@tuesday/core";
-import { isBlockingOutlookEvent, outlookEventDisplayLabel } from "@tuesday/core";
+import {
+  isBlockingOutlookEvent,
+  outlookEventDisplayLabel,
+  formatTimeRangeInZone,
+  dayTitleInZone,
+  dayKeysInZone,
+  utcIsoToDateKey,
+  DEFAULT_SCHEDULING_PREFERENCES,
+} from "@tuesday/core";
 
 export type WeekGridBlock = {
   id: string;
@@ -13,31 +21,18 @@ export type WeekGridBlock = {
   status?: SchedulableFundraisingTask["schedulingStatus"];
 };
 
-function formatRange(start: string, end: string) {
-  const s = new Date(start);
-  const e = new Date(end);
-  return `${s.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–${e.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-}
-
-function dayKeys(weekStart: string, workDays: number): string[] {
-  const keys: string[] = [];
-  const d = new Date(`${weekStart}T12:00:00`);
-  for (let i = 0; i < workDays; i++) {
-    const x = new Date(d);
-    x.setDate(x.getDate() + i);
-    keys.push(x.toISOString().slice(0, 10));
-  }
-  return keys;
-}
-
 export function buildWeekGrid(input: {
   schedule?: CalendarAwareSchedule | null;
   outlookEvents?: OutlookBusyBlock[];
   weekStart: string;
   workDays?: number;
+  timezone?: string;
 }): Record<string, WeekGridBlock[]> {
+  const zone =
+    input.schedule?.timezone ?? input.timezone ?? DEFAULT_SCHEDULING_PREFERENCES.timezone;
   const workDays = input.schedule?.preferences.workDays ?? input.workDays ?? 5;
-  const days = dayKeys(input.schedule?.weekStart ?? input.weekStart, workDays);
+  const ws = input.schedule?.weekStart ?? input.weekStart;
+  const days = dayKeysInZone(ws, workDays, zone);
   const outlook = input.schedule?.outlookEvents ?? input.outlookEvents ?? [];
   const tasks = input.schedule?.tasks ?? [];
 
@@ -45,7 +40,7 @@ export function buildWeekGrid(input: {
   for (const day of days) byDay[day] = [];
 
   for (const ev of outlook) {
-    const day = ev.start.slice(0, 10);
+    const day = utcIsoToDateKey(ev.start, zone);
     if (!byDay[day]) continue;
     const blocking = isBlockingOutlookEvent(ev);
     byDay[day].push({
@@ -53,7 +48,7 @@ export function buildWeekGrid(input: {
       kind: blocking ? "outlook_busy" : "outlook_free",
       start: ev.start,
       end: ev.end,
-      label: `${formatRange(ev.start, ev.end)} · ${blocking ? "Busy" : "Outlook"} · ${outlookEventDisplayLabel(ev)}`,
+      label: `${formatTimeRangeInZone(ev.start, ev.end, zone)} · ${blocking ? "Busy" : "Outlook"} · ${outlookEventDisplayLabel(ev)}`,
       detail: blocking ? "Not available for Tuesday task placement" : "Shown for context — does not block scheduling",
     });
   }
@@ -61,7 +56,7 @@ export function buildWeekGrid(input: {
   for (const task of tasks) {
     if (!task.suggestedStart || !task.suggestedEnd) continue;
     if (task.schedulingStatus === "denied") continue;
-    const day = task.suggestedStart.slice(0, 10);
+    const day = utcIsoToDateKey(task.suggestedStart, zone);
     if (!byDay[day]) continue;
     const approved = task.schedulingStatus === "approved";
     byDay[day].push({
@@ -69,7 +64,7 @@ export function buildWeekGrid(input: {
       kind: "fundraising",
       start: task.suggestedStart,
       end: task.suggestedEnd,
-      label: `${formatRange(task.suggestedStart, task.suggestedEnd)} · ${task.title}`,
+      label: `${formatTimeRangeInZone(task.suggestedStart, task.suggestedEnd, zone)} · ${task.title}`,
       detail: task.whyNow,
       taskId: task.id,
       conflict: task.hasCalendarConflict,
@@ -85,7 +80,6 @@ export function buildWeekGrid(input: {
   return byDay;
 }
 
-export function dayTitle(dateKey: string) {
-  const d = new Date(`${dateKey}T12:00:00`);
-  return d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+export function dayTitle(dateKey: string, timezone?: string) {
+  return dayTitleInZone(dateKey, timezone ?? DEFAULT_SCHEDULING_PREFERENCES.timezone);
 }

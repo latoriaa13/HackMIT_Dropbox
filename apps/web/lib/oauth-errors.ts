@@ -1,18 +1,19 @@
 const ERROR_HINTS: Record<string, string> = {
-  not_configured: "Add MICROSOFT_CLIENT_ID to .env.local (see .env.example).",
-  oauth_cancelled: "Microsoft sign-in was cancelled.",
-  oauth_denied: "Microsoft denied the sign-in request.",
-  invalid_oauth_state: "OAuth state expired or was invalid — try Connect again.",
+  not_configured:
+    "Tuesday isn't set up for Microsoft sign-in yet. Ask whoever runs this app to finish setup, then try again.",
+  oauth_cancelled: "Sign-in was cancelled. Click Connect when you're ready to try again.",
+  oauth_denied: "Microsoft didn't approve the sign-in. Try again and choose Allow on each screen.",
+  invalid_oauth_state: "That sign-in took too long. Please click Connect and try again.",
   oauth_invalid_client:
-    "Microsoft sign-in failed: the app client secret is wrong or expired. Update MICROSOFT_CLIENT_SECRET in .env.local, restart the dev server, then connect again.",
+    "We couldn't finish signing you in. Ask whoever manages Tuesday to check the Microsoft app settings, then try Connect again.",
   oauth_token_exchange_failed:
-    "Microsoft sign-in could not be completed. Check Entra app credentials in .env.local and try Connect again.",
+    "We couldn't finish signing you in. Wait a moment, then click Connect and sign in with your Outlook account again.",
   calendar_connected:
-    "Outlook calendar connected — you can refresh your calendar and build a schedule on the weekly plan.",
+    "Your Outlook calendar is connected. You can refresh your calendar and build your weekly plan.",
   mail_connected:
-    "Outlook mail connected — you can draft email in Autopilot and on the weekly queue.",
+    "Your Outlook email is connected. You can draft and send messages from Autopilot.",
   connected:
-    "Microsoft 365 connected — calendar and mail features are available when permissions were granted.",
+    "You're connected to Microsoft Outlook. Calendar and email features are ready when you approved access.",
 };
 
 export function formatOAuthReturnMessage(code: string): string {
@@ -30,13 +31,15 @@ export function formatAutopilotOAuthError(code: string): string {
   }
   if (
     decoded.includes("invalid_client") ||
-    decoded.includes("AADSTS7000215") ||
-    decoded.includes("Client secret")
+    decoded.includes("AADSTS") ||
+    decoded.includes("Client secret") ||
+    decoded.includes("Entra") ||
+    decoded.includes(".env")
   ) {
-    return ERROR_HINTS.oauth_invalid_client;
-  }
-  if (decoded.length > 200) {
     return ERROR_HINTS.oauth_token_exchange_failed;
+  }
+  if (decoded.length > 120 || /[{}[\]\\]|graph|oauth|token/i.test(decoded)) {
+    return "We couldn't finish signing you in. Please click Connect and try again with your Outlook account.";
   }
   return decoded;
 }

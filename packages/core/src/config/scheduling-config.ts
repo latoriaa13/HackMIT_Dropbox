@@ -1,12 +1,18 @@
 import type { ActionType } from "../models/types";
 
+/** Full-time week: 5 × 8h days (typical 9–5). */
+export const STANDARD_WEEKLY_WORK_HOURS = 40;
+export const STANDARD_WORK_DAY_START = 9;
+export const STANDARD_WORK_DAY_END = 17;
+
 /** Default scheduling preferences for calendar-aware planning. */
 export const DEFAULT_SCHEDULING_PREFERENCES = {
   timezone: "America/New_York",
-  workingHoursStart: 9,
-  workingHoursEnd: 17,
+  workingHoursStart: STANDARD_WORK_DAY_START,
+  workingHoursEnd: STANDARD_WORK_DAY_END,
+  /** No default lunch block — 9–5 counts as 8h/day (40h/week). */
   lunchStartHour: 12,
-  lunchEndHour: 13,
+  lunchEndHour: 12,
   bufferBetweenTasksMinutes: 15,
   gapAfterIntensiveCallMinutes: 15,
   reserveBufferMinutes: 30,

@@ -10,6 +10,7 @@ import type {
   OutlookBusyBlock,
   RiskPreference,
 } from "@tuesday/core";
+import { defaultPlanningWeekStartIso } from "@tuesday/core";
 import { WeekPlannerGrid } from "@/components/WeekPlannerGrid";
 import { QueueCard } from "@/components/QueueCard";
 import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
@@ -18,6 +19,8 @@ import { formatCurrency } from "@/lib/format";
 import { applyFeedbackDeprioritize, feedbackCount } from "@/lib/feedback";
 import { formatM365UserError } from "@/lib/m365-user-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
+import { M365SessionProvider } from "@/components/M365SessionContext";
+import { DevPortWarning } from "@/components/DevPortWarning";
 
 const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
   { value: "protect_renewals", label: "Protect renewals" },
@@ -27,21 +30,13 @@ const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
   { value: "fill_an_event", label: "Fill an event" },
 ];
 
-const HOUR_OPTIONS = [4, 8, 16];
-
-function mondayIso(d = new Date()) {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const m = new Date(d);
-  m.setDate(m.getDate() + diff);
-  return m.toISOString().slice(0, 10);
-}
+const HOUR_OPTIONS = [20, 40];
 
 type ViewMode = "queue" | "schedule" | "split";
 
 export default function WeeklyPlanPage() {
   const [objective, setObjective] = useState<FundraisingObjective>("protect_renewals");
-  const [staffHours, setStaffHours] = useState(8);
+  const [staffHours, setStaffHours] = useState(40);
   const [riskPreference, setRiskPreference] = useState<RiskPreference>("balanced");
   const [channels, setChannels] = useState<Channel[]>([
     "phone",
@@ -49,7 +44,7 @@ export default function WeeklyPlanPage() {
     "event_invitation",
     "stewardship_message",
   ]);
-  const [weekStart, setWeekStart] = useState(mondayIso());
+  const [weekStart, setWeekStart] = useState(() => defaultPlanningWeekStartIso());
   const [workingHoursStart, setWorkingHoursStart] = useState(9);
   const [workingHoursEnd, setWorkingHoursEnd] = useState(17);
   const [lunchStartHour, setLunchStartHour] = useState(12);
@@ -60,24 +55,48 @@ export default function WeeklyPlanPage() {
   const [result, setResult] = useState<BuildTuesdayResult | null>(null);
   const [schedule, setSchedule] = useState<CalendarAwareSchedule | null>(null);
   const [outlookConnected, setOutlookConnected] = useState(false);
+  const [microsoftAccountEmail, setMicrosoftAccountEmail] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [metaError, setMetaError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState<string>("");
   const [feedbackTotal, setFeedbackTotal] = useState(0);
   const [outlookPreview, setOutlookPreview] = useState<OutlookBusyBlock[]>([]);
+  const [outlookTimezone, setOutlookTimezone] = useState<string | undefined>();
 
-  useEffect(() => {
+  const syncOutlookPreview = useCallback(async () => {
     if (!outlookConnected) {
       setOutlookPreview([]);
       return;
     }
-    fetch(`/api/m365/calendar/week?weekStart=${weekStart}&sync=1`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.outlookEvents) setOutlookPreview(d.outlookEvents);
-      })
-      .catch(() => setOutlookPreview([]));
-  }, [outlookConnected, weekStart]);
+    try {
+      const res = await fetch(
+        `/api/m365/calendar/week?weekStart=${encodeURIComponent(weekStart)}&sync=1`
+      );
+      const d = await res.json();
+      if (!res.ok) {
+        setOutlookPreview([]);
+        const formatted = formatM365UserError(d, {
+          accountEmail: microsoftAccountEmail,
+          outlookReady: outlookConnected,
+          missingCalendarConsent: false,
+        });
+        if (formatted.severity === "warning") {
+          setError(null);
+        } else {
+          setError(formatted);
+        }
+        return;
+      }
+      setOutlookPreview(d.outlookEvents ?? []);
+      if (d.cache?.timezone) setOutlookTimezone(d.cache.timezone);
+    } catch {
+      setOutlookPreview([]);
+    }
+  }, [outlookConnected, weekStart, microsoftAccountEmail]);
+
+  useEffect(() => {
+    void syncOutlookPreview();
+  }, [syncOutlookPreview]);
 
   useEffect(() => {
     fetch("/api/meta")
@@ -122,7 +141,12 @@ export default function WeeklyPlanPage() {
         });
         const data = await res.json();
         if (!res.ok) {
-          setError(formatM365UserError(data));
+          const formatted = formatM365UserError(data, {
+            accountEmail: microsoftAccountEmail,
+            outlookReady: outlookConnected,
+            missingCalendarConsent: false,
+          });
+          setError(formatted.severity === "error" ? formatted : null);
           return;
         }
         setSchedule(data.schedule);
@@ -202,8 +226,17 @@ export default function WeeklyPlanPage() {
   };
 
   return (
+    <M365SessionProvider>
     <div className="space-y-8">
-      <OutlookConnectionCard onConnectionChange={setOutlookConnected} />
+      <DevPortWarning />
+      <OutlookConnectionCard
+        planningWeekStart={weekStart}
+        onConnectionChange={(ready, meta) => {
+          setOutlookConnected(ready);
+          if (meta) setMicrosoftAccountEmail(meta.email ?? null);
+        }}
+        onCalendarSynced={() => void syncOutlookPreview()}
+      />
 
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight">Build my Tuesday</h1>
@@ -238,7 +271,10 @@ export default function WeeklyPlanPage() {
 
           <div className="space-y-4">
             <fieldset>
-              <legend className="text-sm font-medium">Staff time this week</legend>
+              <legend className="text-sm font-medium">Fundraising time budget this week</legend>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Full-time is 40 hours (Mon–Fri, 9:00–5:00). Calendar planning uses the same 9–5 window.
+              </p>
               <div className="mt-2 flex gap-2">
                 {HOUR_OPTIONS.map((h) => (
                   <button
@@ -283,7 +319,7 @@ export default function WeeklyPlanPage() {
             />
           </label>
           <label className="text-sm">
-            Work day start (hour)
+            Work day start (hour, default 9 AM)
             <input
               type="number"
               min={6}
@@ -294,7 +330,7 @@ export default function WeeklyPlanPage() {
             />
           </label>
           <label className="text-sm">
-            Work day end (hour)
+            Work day end (hour, default 5 PM)
             <input
               type="number"
               min={13}
@@ -403,6 +439,8 @@ export default function WeeklyPlanPage() {
               label={error.action.label}
               variant="primary"
               className="mt-3"
+              accountKind={error.action.accountKind}
+              reauth={error.action.reauth}
             />
           )}
         </div>
@@ -435,7 +473,11 @@ export default function WeeklyPlanPage() {
               <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
                 Outlook this week
               </h2>
-              <WeekPlannerGrid weekStart={weekStart} outlookEvents={outlookPreview} />
+              <WeekPlannerGrid
+                weekStart={weekStart}
+                outlookEvents={outlookPreview}
+                timezone={outlookTimezone}
+              />
               <p className="text-sm text-[var(--muted)]">
                 Click <strong>Build schedule</strong> to add proposed fundraising tasks in open slots (never
                 on busy Outlook blocks).
@@ -467,6 +509,7 @@ export default function WeeklyPlanPage() {
         </section>
       )}
     </div>
+    </M365SessionProvider>
   );
 }
 

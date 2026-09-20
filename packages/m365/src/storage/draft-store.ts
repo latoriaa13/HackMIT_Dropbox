@@ -111,6 +111,23 @@ export function removeEmailDraft(draftId: string) {
   save(store);
 }
 
+/** Remove inbox drafts addressed to a recipient (e.g. after demo send logged). */
+export function removeEmailDraftsToRecipient(userId: string, recipient: string) {
+  const store = load();
+  const needle = recipient.toLowerCase();
+  let changed = false;
+  for (const [id, draft] of Object.entries(store.emailDrafts)) {
+    if (
+      draft.userId === userId &&
+      draft.to.some((addr) => addr.toLowerCase() === needle)
+    ) {
+      delete store.emailDrafts[id];
+      changed = true;
+    }
+  }
+  if (changed) save(store);
+}
+
 export function removeEventDraft(draftId: string) {
   const store = load();
   delete store.eventDrafts[draftId];

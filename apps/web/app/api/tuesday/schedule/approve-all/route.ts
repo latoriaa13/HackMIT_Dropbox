@@ -24,7 +24,7 @@ export async function POST() {
     for (const task of schedule.tasks) {
       if (task.schedulingStatus !== "proposed") continue;
       if (task.hasCalendarConflict) continue;
-      const draft = await approveScheduleTaskDraft(provider, userId, task, appBase);
+      const draft = await approveScheduleTaskDraft(provider, userId, task, appBase, schedule.timezone);
       schedule = applyTaskApproval(schedule, task.id, draft.draftId);
       approved.push(task.id);
     }

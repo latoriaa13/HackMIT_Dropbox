@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { consumeMicrosoftOAuthReturn, formatOAuthReturnMessage } from "@/lib/oauth-errors";
-import { formatM365UserError } from "@/lib/m365-user-errors";
+import { formatM365UserError, type M365UserErrorContext } from "@/lib/m365-user-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
 import {
   gmailInOutlookVsGraphMessage,
   guestExternalAccountMessage,
   isGuestExternalMicrosoftAccount,
 } from "@/lib/microsoft-account-hints";
+import { useM365Session } from "@/components/M365SessionContext";
 
 type M365Status = {
   accountLinked?: boolean;
@@ -36,10 +37,19 @@ type CalendarCache = {
 } | null;
 
 export function OutlookConnectionCard({
+  planningWeekStart,
   onConnectionChange,
+  onCalendarSynced,
 }: {
-  onConnectionChange?: (outlookReady: boolean) => void;
+  /** Monday of the week shown on the weekly plan (must match calendar sync). */
+  planningWeekStart?: string;
+  onConnectionChange?: (
+    outlookReady: boolean,
+    meta?: { email?: string | null; isGuestExternalAccount?: boolean }
+  ) => void;
+  onCalendarSynced?: (info: { eventCount: number; weekStart: string; weekEnd?: string }) => void;
 }) {
+  const m365Ctx = useM365Session();
   const [status, setStatus] = useState<M365Status | null>(null);
   const [cache, setCache] = useState<CalendarCache>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -47,21 +57,45 @@ export function OutlookConnectionCard({
   const [permissionError, setPermissionError] = useState<ReturnType<typeof formatM365UserError> | null>(
     null
   );
+  const [syncWarning, setSyncWarning] = useState<ReturnType<typeof formatM365UserError> | null>(null);
+
+  const errorContext = (st: M365Status | null): M365UserErrorContext => ({
+    accountEmail: st?.email ?? st?.accountEmail ?? null,
+    outlookReady: st?.outlookReady === true,
+    missingCalendarConsent: st?.missingCalendarConsent,
+  });
+
+  const applyCalendarError = (st: M365Status | null, data: Record<string, unknown>) => {
+    const formatted = formatM365UserError(data as Parameters<typeof formatM365UserError>[0], errorContext(st));
+    if (formatted.severity === "warning") {
+      setSyncWarning(formatted);
+      setPermissionError(null);
+    } else {
+      setPermissionError(formatted);
+      setSyncWarning(null);
+    }
+  };
 
   const load = useCallback(async (verify = false) => {
     const q = verify ? "?verify=1" : "";
     const st = await fetch(`/api/m365/status${q}`).then((r) => r.json());
     setStatus(st);
-    onConnectionChange?.(st.outlookReady === true);
+    onConnectionChange?.(st.outlookReady === true, {
+      email: st.email ?? st.accountEmail ?? null,
+      isGuestExternalAccount: st.isGuestExternalAccount,
+    });
 
     if (st.outlookReady) {
-      const weekRes = await fetch("/api/m365/calendar/week");
+      const ws = planningWeekStart ? `weekStart=${encodeURIComponent(planningWeekStart)}&` : "";
+      const weekRes = await fetch(`/api/m365/calendar/week?${ws}sync=1`);
       const week = await weekRes.json().catch(() => ({}));
       if (!weekRes.ok) {
-        setPermissionError(formatM365UserError(week));
+        applyCalendarError(st, week);
         setCache(null);
         return;
       }
+      setSyncWarning(null);
+      setPermissionError(null);
       if (week.cache) {
         setCache({
           syncedAt: week.cache.syncedAt,
@@ -71,9 +105,10 @@ export function OutlookConnectionCard({
       } else setCache(null);
     } else {
       setCache(null);
+      setPermissionError(null);
+      setSyncWarning(null);
     }
-    setPermissionError(null);
-  }, [onConnectionChange]);
+  }, [onConnectionChange, planningWeekStart]);
 
   useEffect(() => {
     void (async () => {
@@ -89,26 +124,45 @@ export function OutlookConnectionCard({
         }
         if (key !== "error" && val && consumeMicrosoftOAuthReturn()) {
           window.history.replaceState({}, "", "/");
-          const st = await fetch("/api/m365/status?verify=1").then((r) => r.json());
+          await load(false);
+          const st = await fetch("/api/m365/status").then((r) => r.json());
           setStatus(st);
-          onConnectionChange?.(st.outlookReady === true);
-          const verified =
-            key === "calendar_connected"
-              ? st.outlookReady
-              : key === "mail_connected"
-                ? st.mailAutopilotReady
-                : st.outlookReady || st.mailAutopilotReady;
-          if (verified) {
+          onConnectionChange?.(st.outlookReady === true, {
+      email: st.email ?? st.accountEmail ?? null,
+      isGuestExternalAccount: st.isGuestExternalAccount,
+    });
+          await m365Ctx?.refresh(false);
+          void fetch("/api/m365/status?verify=1")
+            .then((r) => r.json())
+            .then((verifiedSt) => {
+              if (verifiedSt.capabilityErrors?.calendar || verifiedSt.capabilityErrors?.mail) {
+                setStatus((prev) => ({
+                  ...prev,
+                  ...verifiedSt,
+                  outlookReady: prev?.outlookReady ?? verifiedSt.outlookReady,
+                  mailAutopilotReady: prev?.mailAutopilotReady ?? verifiedSt.mailAutopilotReady,
+                  capabilityErrors: verifiedSt.capabilityErrors,
+                }));
+              }
+            })
+            .catch(() => null);
+          const signedInOk = st.outlookReady || st.mailAutopilotReady;
+          if (signedInOk) {
             setBanner({ type: "ok", text: formatOAuthReturnMessage(key) });
+          } else if (st.isGuestExternalAccount) {
+            setBanner({
+              type: "err",
+              text: "This work or school guest sign-in usually can’t use Outlook calendar here. Try Connect — personal (outlook.com) with the account you use in Outlook.",
+            });
           } else {
             setBanner({
               type: "err",
               text:
                 key === "calendar_connected"
-                  ? "Sign-in finished, but Outlook calendar is not verified yet. Use Connect calendar or Reconnect (all permissions)."
+                  ? "You signed in, but your calendar still isn’t connected. Click Connect calendar and choose Allow."
                   : key === "mail_connected"
-                    ? "Sign-in finished, but mail is not verified yet. Use Connect mail on Autopilot or Reconnect."
-                    : "Sign-in finished, but Graph permissions are not verified yet. Reconnect below.",
+                    ? "You signed in, but email still isn’t connected. Open Autopilot and click Connect mail."
+                    : "You signed in, but we couldn’t confirm Outlook access. Try Connect calendar or Reconnect below.",
             });
           }
           break;
@@ -119,21 +173,44 @@ export function OutlookConnectionCard({
 
   const refreshCalendar = async () => {
     if (!status?.outlookReady) {
-      setPermissionError(
-        formatM365UserError({ code: "MICROSOFT365_PERMISSION_ERROR", requiredScopes: ["Calendars.Read"] })
-      );
+      applyCalendarError(status, {
+        code: "MICROSOFT365_PERMISSION_ERROR",
+        requiredScopes: ["Calendars.Read"],
+      });
       return;
     }
     setRefreshing(true);
+    setPermissionError(null);
+    setSyncWarning(null);
     try {
-      const res = await fetch("/api/m365/calendar/refresh", { method: "POST" });
+      const res = await fetch("/api/m365/calendar/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weekStart: planningWeekStart }),
+      });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPermissionError(formatM365UserError(data));
+      if (!res.ok || data.ok === false) {
+        applyCalendarError(status, data);
         return;
       }
-      setBanner({ type: "ok", text: "Outlook calendar updated." });
-      await load(true);
+      const count = data.calendarSync?.eventCount ?? data.outlookEvents?.length ?? 0;
+      const ws = data.calendarSync?.weekStart ?? planningWeekStart ?? "";
+      const we = data.calendarSync?.weekEnd;
+      if (count === 0) {
+        setBanner({
+          type: "ok",
+          text: we
+            ? `Calendar refreshed for ${ws} – ${we}. No meetings found that week in Outlook (try another planning week if your events are elsewhere).`
+            : "Calendar refreshed. No meetings found for your planning week in Outlook.",
+        });
+      } else {
+        setBanner({
+          type: "ok",
+          text: `Loaded ${count} Outlook meeting${count === 1 ? "" : "s"} for week of ${ws}.`,
+        });
+      }
+      onCalendarSynced?.({ eventCount: count, weekStart: ws, weekEnd: we });
+      await load(false);
     } finally {
       setRefreshing(false);
     }
@@ -160,11 +237,11 @@ export function OutlookConnectionCard({
           <a href="https://outlook.live.com/mail/" className="font-medium underline" target="_blank" rel="noreferrer">
             outlook.com
           </a>
-          . Approve <strong>Calendars.Read</strong> so Tuesday can read availability. Not sure which type you use? Try
-          personal first (most outlook.com / Gmail-via-Microsoft logins).
+          . When Microsoft asks, choose <strong>Allow</strong> so Tuesday can see when you’re free. Not sure which
+          type you use? Try personal first (most @outlook.com and @hotmail.com accounts).
         </p>
         {status.configurationError ? (
-          <p className="mt-3 text-sm text-red-800">Microsoft Entra is not configured on this server.</p>
+          <p className="mt-3 text-sm text-red-800">Microsoft sign-in isn’t set up for this app yet.</p>
         ) : (
           <div className="mt-4 flex flex-wrap gap-2">
             <MicrosoftPermissionConnect
@@ -199,7 +276,7 @@ export function OutlookConnectionCard({
             {banner.text}
           </p>
         )}
-        <h2 className="text-lg font-semibold text-amber-950">Microsoft signed in — calendar not verified</h2>
+        <h2 className="text-lg font-semibold text-amber-950">Signed in — calendar not connected yet</h2>
         <p className="mt-2 text-sm text-amber-900">{email}</p>
         {isGuestExternal && (
           <div className="mt-3 space-y-2 rounded-lg border border-red-300 bg-red-50 px-3 py-3 text-sm text-red-950">
@@ -209,7 +286,7 @@ export function OutlookConnectionCard({
         )}
         <p className="mt-2 max-w-xl text-sm text-amber-900">
           {status.message ??
-            "We could not read your Outlook calendar yet. Connect calendar permissions (same flow as mail on Autopilot)."}
+            "We couldn't read your Outlook calendar yet. Click Connect calendar and choose Allow when Microsoft asks."}
         </p>
         {(() => {
           const cal = status.capabilityErrors?.calendar;
@@ -267,13 +344,24 @@ export function OutlookConnectionCard({
           )}
         </div>
         <p className="mt-3 text-xs text-amber-900">
-          Tip: If your email shows <code className="font-mono">#EXT#</code>, you are a guest in a tenant — use an
-          account with a real Outlook mailbox (@outlook.com or work/school M365).
+          Tip: Use the same account you open in Outlook on the web. Guest or shared work sign-ins often don’t include a
+          calendar Tuesday can use.
         </p>
         {permissionError && (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-950">
             <p className="font-medium">{permissionError.title}</p>
             <p className="mt-1">{permissionError.detail}</p>
+            {permissionError.action && (
+              <MicrosoftPermissionConnect
+                consent={permissionError.action.consent}
+                returnTo="/"
+                label={permissionError.action.label}
+                variant="primary"
+                className="mt-2"
+                accountKind={permissionError.action.accountKind}
+                reauth={permissionError.action.reauth}
+              />
+            )}
           </div>
         )}
       </div>
@@ -287,17 +375,20 @@ export function OutlookConnectionCard({
           {banner.text}
         </p>
       )}
+      {syncWarning && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p className="font-medium">{syncWarning.title}</p>
+          <p className="mt-1">{syncWarning.detail}</p>
+        </div>
+      )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-green-950">Outlook calendar connected</h2>
           <p className="mt-1 text-sm text-green-900">{email}</p>
-          <p className="mt-1 text-xs text-green-800">Verified with Microsoft Graph — availability and refresh use live data.</p>
-          {status.grantedScopes && status.grantedScopes.length > 0 && (
-            <p className="mt-1 text-xs text-green-800">Token scopes: {status.grantedScopes.join(", ")}</p>
-          )}
+          <p className="mt-1 text-xs text-green-800">Your live Outlook calendar is used for availability and refresh.</p>
           {!status.mailAutopilotReady && (
             <p className="mt-2 text-xs text-amber-900">
-              Mail not verified for send — use Autopilot → Connect mail for email drafts.
+              Email isn’t connected yet — open Autopilot and click Connect mail to draft and send messages.
             </p>
           )}
           {cache?.syncedAt && (
@@ -332,6 +423,8 @@ export function OutlookConnectionCard({
               label={permissionError.action.label}
               variant="primary"
               className="mt-2"
+              accountKind={permissionError.action.accountKind}
+              reauth={permissionError.action.reauth}
             />
           )}
         </div>

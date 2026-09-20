@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
-import { getEmailDraft, getEventDraft, listPendingDrafts } from "@tuesday/m365";
+import {
+  ensureDemoThankYouEmailDraft,
+  getEmailDraft,
+  getEventDraft,
+  listPendingDrafts,
+} from "@tuesday/m365";
 import { getSessionUserId } from "@/lib/session";
 
 export async function GET() {
   const userId = await getSessionUserId();
+  ensureDemoThankYouEmailDraft(userId);
   const pending = listPendingDrafts(userId);
   const emails = pending.emails.map((d) => {
     const full = getEmailDraft(d.draftId, userId);

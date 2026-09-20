@@ -15,6 +15,8 @@ export const ListEventsInputSchema = z.object({
   start: z.string(),
   end: z.string(),
   timezone: z.string().default("America/New_York"),
+  /** Windows timezone for Prefer: outlook.timezone (from mailbox settings). */
+  outlookTimeZone: z.string().optional(),
 });
 export type ListEventsInput = z.infer<typeof ListEventsInputSchema>;
 

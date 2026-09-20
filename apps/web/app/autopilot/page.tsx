@@ -8,6 +8,10 @@ import {
   markMicrosoftOAuthAttempt,
 } from "@/lib/oauth-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
+import {
+  guestExternalAccountMessage,
+  isGuestExternalMicrosoftAccount,
+} from "@/lib/microsoft-account-hints";
 
 type Status = {
   connected: boolean;
@@ -28,6 +32,7 @@ type Status = {
   mailAutopilotReady?: boolean;
   calendarReady?: boolean;
   accountLinked?: boolean;
+  isGuestExternalAccount?: boolean;
   capabilityErrors?: { calendar?: string; mail?: string };
   configErrors?: string[];
   message?: string;
@@ -49,25 +54,54 @@ export default function AutopilotPage() {
   const [events, setEvents] = useState<PendingDraft[]>([]);
   const [audit, setAudit] = useState<Array<{ actionType: string; status: string; payloadSummary: string; createdAt: string }>>([]);
   const [tasks, setTasks] = useState<Array<{ id: string; title: string; status: string; instruction: string }>>([]);
+  const [inboxTab, setInboxTab] = useState<"pending" | "completed">("pending");
+  const [scheduleApproved, setScheduleApproved] = useState<
+    Array<{ id: string; title: string; constituentName: string }>
+  >([]);
+  const [completedItems, setCompletedItems] = useState<{
+    audit: Array<{ actionType: string; payloadSummary: string; createdAt: string; target: string }>;
+    scheduleTasks: Array<{ id: string; title: string; constituentName: string }>;
+    automationTasks: Array<{ id: string; title: string }>;
+  }>({ audit: [], scheduleTasks: [], automationTasks: [] });
   const [msg, setMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [st, pending, aud, t] = await Promise.all([
+    const [st, pending, aud, t, done, sched] = await Promise.all([
       fetch("/api/m365/status?verify=1").then((r) => r.json()),
       fetch("/api/automation/pending").then((r) => r.json()),
       fetch("/api/automation/audit").then((r) => r.json()),
       fetch("/api/automation/tasks").then((r) => r.json()),
+      fetch("/api/automation/completed").then((r) => r.json()),
+      fetch("/api/tuesday/schedule").then((r) => r.json()),
     ]);
     setStatus(st);
     setEmails(pending.emails ?? []);
     setEvents(pending.events ?? []);
     setAudit(aud.logs ?? []);
     setTasks(t.tasks ?? []);
+    setCompletedItems({
+      audit: done.audit ?? [],
+      scheduleTasks: done.scheduleTasks ?? [],
+      automationTasks: done.automationTasks ?? [],
+    });
+    const approved =
+      sched.schedule?.tasks?.filter(
+        (task: { schedulingStatus: string }) => task.schedulingStatus === "approved"
+      ) ?? [];
+    setScheduleApproved(
+      approved.map((task: { id: string; title: string; constituentName: string }) => ({
+        id: task.id,
+        title: task.title,
+        constituentName: task.constituentName,
+      }))
+    );
   }, []);
 
   useEffect(() => {
     refresh();
     const p = new URLSearchParams(window.location.search);
+    const tab = p.get("tab");
+    if (tab === "pending" || tab === "completed") setInboxTab(tab);
     const connected = p.get("connected");
     const error = p.get("error");
     const calendarConnected = p.get("calendar_connected");
@@ -97,8 +131,48 @@ export default function AutopilotPage() {
       }),
     });
     const data = await res.json();
-    setMsg(decision === "approve" ? data.message ?? "Executed" : "Rejected");
+    if (!res.ok) {
+      setMsg(
+        data.message && !/graph|token|scope|403|401/i.test(String(data.message))
+          ? data.message
+          : "We couldn't send that message. Try Connect mail and choose Allow when Microsoft asks."
+      );
+      return;
+    }
+    setMsg(
+      decision === "approve"
+        ? (data.message ?? "Sent — see Completed tab.")
+        : (data.message ?? "Rejected")
+    );
+    if (decision === "approve") {
+      setInboxTab("completed");
+      window.history.replaceState({}, "", "/autopilot?tab=completed");
+    }
     refresh();
+  };
+
+  const completeAutomationTask = async (id: string) => {
+    const res = await fetch(`/api/automation/tasks/${id}/complete`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) setMsg(data.error ?? "Could not complete task");
+    else {
+      setMsg(data.message ?? "Task marked complete.");
+      setInboxTab("completed");
+      window.history.replaceState({}, "", "/autopilot?tab=completed");
+      refresh();
+    }
+  };
+
+  const completeScheduleTask = async (taskId: string) => {
+    const res = await fetch(`/api/tuesday/schedule/${taskId}/complete`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) setMsg(data.message ?? data.error ?? "Could not complete task");
+    else {
+      setMsg(data.message ?? "Task marked complete.");
+      setInboxTab("completed");
+      window.history.replaceState({}, "", "/autopilot?tab=completed");
+      refresh();
+    }
   };
 
   const createTask = async () => {
@@ -133,8 +207,8 @@ export default function AutopilotPage() {
       <header>
         <h1 className="text-2xl font-semibold">Tuesday Autopilot</h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-          Prepare outreach through your Microsoft 365 mailbox and calendar. Every send and calendar invitation
-          requires explicit approval in the inbox below.
+          Prepare outreach through your Outlook email and calendar. Every send and meeting invitation needs your
+          approval in the inbox below.
         </p>
         <Link href="/" className="mt-2 inline-block text-sm text-[var(--accent)] hover:underline">
           ← Back to weekly plan
@@ -144,63 +218,62 @@ export default function AutopilotPage() {
       {msg && <p className="rounded-lg bg-[var(--accent-soft)] px-4 py-2 text-sm">{msg}</p>}
 
       <section className="rounded-xl border bg-white p-5">
-        <h2 className="font-semibold">Microsoft 365 connection</h2>
+        <h2 className="font-semibold">Outlook connection</h2>
         {status && (
           <div className="mt-3 space-y-2 text-sm">
             <p>
-              Provider:{" "}
-              <strong>
-                {status.connected ? "Microsoft Graph (connected)" : "Microsoft Graph (not connected)"}
-              </strong>
+              Status:{" "}
+              <strong>{status.connected ? "Connected" : "Not connected"}</strong>
             </p>
             {(status.displayName || status.accountName) && (
               <p>Name: {status.displayName ?? status.accountName}</p>
             )}
             {(status.email || status.accountEmail) && (
-              <p>Email: {status.email ?? status.accountEmail}</p>
+              <p>Signed in as: {status.email ?? status.accountEmail}</p>
             )}
-            {status.tenantId && <p className="text-xs text-[var(--muted)]">Tenant: {status.tenantId}</p>}
             {status.message && <p className="text-amber-800">{status.message}</p>}
             {status.configurationError && (
               <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-900">
-                Microsoft Entra configuration is missing. Set MICROSOFT_CLIENT_ID in `.env.local` (see
-                `.env.example`).
+                Microsoft sign-in isn’t set up for this app yet. Ask whoever manages Tuesday to finish setup.
               </p>
             )}
             {!status.configurationError && !status.connected && (
               <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                Microsoft 365 connection required — connect to draft email, find meeting times, and run automation
-                tasks.
+                Connect Outlook to draft email, find meeting times, and run automated follow-ups.
               </p>
             )}
             {status.mailAutopilotReady && (
               <p className="rounded border border-green-200 bg-green-50 px-3 py-2 text-green-900">
-                Mail verified — you can draft and approve email through Graph.
+                Email is connected — you can draft and approve messages here.
               </p>
             )}
             {status.accountLinked && !status.mailAutopilotReady && (
               <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                Mail not verified yet — connect mail to draft and send email.
+                Email isn’t connected yet — click Connect mail and choose Allow when Microsoft asks.
               </p>
             )}
-            {status.capabilityErrors?.mail && (
+            {status.isGuestExternalAccount && (
+              <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950">
+                {guestExternalAccountMessage()} Use <strong>Connect personal Outlook (email)</strong>{" "}
+                below — pick your @outlook.com account, not a guest work sign-in.
+              </p>
+            )}
+            {status.capabilityErrors?.mail && !status.isGuestExternalAccount && (
               <p className="text-sm text-red-800">{status.capabilityErrors.mail}</p>
             )}
             {status.capabilityErrors?.calendar && (
               <p className="text-sm text-red-800">{status.capabilityErrors.calendar}</p>
             )}
-            {status.grantedScopes?.length > 0 && (
-              <p className="text-xs text-[var(--muted)]">Granted: {status.grantedScopes.join(", ")}</p>
-            )}
             <div className="flex flex-wrap gap-2 pt-2">
               {!status.connected && status.canStartOAuth !== false && (
-                <a
-                  href={status.connectUrl ?? "/api/auth/microsoft/connect"}
-                  onClick={() => markMicrosoftOAuthAttempt()}
-                  className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-                >
-                  Connect Microsoft 365
-                </a>
+                <MicrosoftPermissionConnect
+                  consent="mail"
+                  returnTo="/autopilot"
+                  label="Connect personal Outlook (email)"
+                  variant="primary"
+                  pickAccount
+                  accountKind="personal"
+                />
               )}
               {status.connected && status.missingCalendarConsent && (
                 <MicrosoftPermissionConnect
@@ -210,7 +283,14 @@ export default function AutopilotPage() {
                 />
               )}
               {status.connected && status.missingMailConsent && (
-                <MicrosoftPermissionConnect consent="mail" returnTo="/autopilot" label="Connect mail" />
+                <MicrosoftPermissionConnect
+                  consent="mail"
+                  returnTo="/autopilot"
+                  label="Connect personal Outlook (email)"
+                  pickAccount
+                  accountKind="personal"
+                  reauth={status.isGuestExternalAccount}
+                />
               )}
               {status.connected && (
                 <button
@@ -218,7 +298,7 @@ export default function AutopilotPage() {
                   className="rounded-lg border px-4 py-2 text-sm"
                   onClick={async () => {
                     await fetch("/api/auth/microsoft/disconnect", { method: "POST" });
-                    setMsg("Disconnected from Microsoft 365.");
+                    setMsg("Disconnected from Outlook.");
                     refresh();
                   }}
                 >
@@ -231,20 +311,107 @@ export default function AutopilotPage() {
       </section>
 
       <section className="rounded-xl border bg-white p-5">
-        <h2 className="font-semibold">Approval inbox</h2>
-        {!status?.mailAutopilotReady && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">Approval inbox</h2>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setInboxTab("pending");
+                window.history.replaceState({}, "", "/autopilot?tab=pending");
+              }}
+              className={`rounded-lg px-3 py-1 text-sm ${
+                inboxTab === "pending" ? "bg-[var(--accent)] text-white" : "border bg-white"
+              }`}
+            >
+              Pending
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setInboxTab("completed");
+                window.history.replaceState({}, "", "/autopilot?tab=completed");
+              }}
+              className={`rounded-lg px-3 py-1 text-sm ${
+                inboxTab === "completed" ? "bg-[var(--accent)] text-white" : "border bg-white"
+              }`}
+            >
+              Completed
+            </button>
+          </div>
+        </div>
+        {!status?.mailAutopilotReady && inboxTab === "pending" && (
           <p className="mt-2 text-sm text-amber-900">Connect mail (verified) to create and approve email drafts.</p>
         )}
-        {status?.mailAutopilotReady && emails.length === 0 && events.length === 0 && (
-          <p className="mt-2 text-sm text-[var(--muted)]">No pending drafts. Use Draft follow-up on the weekly queue.</p>
+        {inboxTab === "pending" && scheduleApproved.length > 0 && (
+          <ul className="mt-3 space-y-2 rounded-lg border border-green-200 bg-green-50/50 p-3 text-sm">
+            <li className="text-xs font-semibold uppercase text-green-900">From weekly plan (awaiting send below)</li>
+            {scheduleApproved.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>{t.title}</span>
+                <button
+                  type="button"
+                  className="rounded border bg-white px-2 py-0.5 text-xs"
+                  onClick={() => completeScheduleTask(t.id)}
+                >
+                  Mark done
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
-        {events.map((d) => (
+        {inboxTab === "pending" &&
+          status?.mailAutopilotReady &&
+          emails.length === 0 &&
+          events.length === 0 &&
+          scheduleApproved.length === 0 && (
+          <p className="mt-2 text-sm text-[var(--muted)]">No pending drafts. Approve tasks on the weekly plan to land here.</p>
+        )}
+        {inboxTab === "completed" && (
+          <div className="mt-3 space-y-3 text-sm">
+            {completedItems.audit.length === 0 &&
+            completedItems.scheduleTasks.length === 0 &&
+            completedItems.automationTasks.length === 0 ? (
+              <p className="text-[var(--muted)]">Nothing completed yet.</p>
+            ) : (
+              <>
+                {completedItems.audit
+                  .filter(
+                    (e) =>
+                      e.actionType === "mail.send_draft" ||
+                      e.actionType === "calendar.send_event_invitation"
+                  )
+                  .map((e) => (
+                  <div key={`${e.createdAt}-${e.target}`} className="rounded border bg-stone-50 px-3 py-2">
+                    <p className="font-medium">{e.payloadSummary}</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {e.actionType.replace(/\./g, " · ")} · {e.createdAt.slice(0, 19)}
+                    </p>
+                  </div>
+                ))}
+                {completedItems.scheduleTasks.map((t) => (
+                  <div key={t.id} className="rounded border bg-stone-50 px-3 py-2">
+                    <p className="font-medium">✓ {t.title}</p>
+                    <p className="text-xs text-[var(--muted)]">Weekly plan task · {t.constituentName}</p>
+                  </div>
+                ))}
+                {completedItems.automationTasks.map((t) => (
+                  <div key={t.id} className="rounded border bg-stone-50 px-3 py-2">
+                    <p className="font-medium">✓ {t.title}</p>
+                    <p className="text-xs text-[var(--muted)]">Automation task</p>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+        {inboxTab === "pending" && events.map((d) => (
           <div key={d.draftId} className="mt-4 rounded-lg border p-4 text-sm">
             <p className="font-medium">Calendar event · {d.subject}</p>
             <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs">
               {d.body ?? d.bodyPreview}
             </pre>
-            <p className="mt-1 text-xs text-amber-800">Microsoft Graph — invitations require approval</p>
+            <p className="mt-1 text-xs text-amber-800">Meeting invitations need your approval before they go out.</p>
             <div className="mt-2 flex gap-2">
               <button type="button" className="rounded bg-[var(--accent)] px-3 py-1 text-xs text-white" onClick={() => approve("event", d, "approve")}>
                 Approve send invitations
@@ -255,14 +422,14 @@ export default function AutopilotPage() {
             </div>
           </div>
         ))}
-        {emails.map((d) => (
+        {inboxTab === "pending" && emails.map((d) => (
           <div key={d.draftId} className="mt-4 rounded-lg border p-4 text-sm">
             <p className="font-medium">Email → {(d.to ?? []).join(", ")}</p>
             <p className="text-[var(--muted)]">{d.subject}</p>
             <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-50 p-2 text-xs">
               {d.body ?? d.bodyPreview}
             </pre>
-            <p className="mt-1 text-xs text-amber-800">Microsoft Graph — send requires approval</p>
+            <p className="mt-1 text-xs text-amber-800">Emails need your approval before they send.</p>
             <div className="mt-2 flex gap-2">
               <button type="button" className="rounded bg-[var(--accent)] px-3 py-1 text-xs text-white" onClick={() => approve("email", d, "approve")}>
                 Approve send
@@ -288,17 +455,32 @@ export default function AutopilotPage() {
           </button>
         </div>
         <ul className="mt-3 space-y-2 text-sm">
-          {tasks.map((t) => (
+          {tasks
+            .filter((t) => t.status !== "completed" && t.status !== "cancelled")
+            .map((t) => (
             <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 border-b py-2">
-              <span>
-                {t.title} · <span className="text-[var(--muted)]">{t.status}</span>
-              </span>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  onChange={() => completeAutomationTask(t.id)}
+                  aria-label={`Mark ${t.title} complete`}
+                />
+                <span>
+                  {t.title} · <span className="text-[var(--muted)]">{t.status}</span>
+                </span>
+              </label>
               <button type="button" className="text-xs text-[var(--accent)]" onClick={() => runTask(t.id)}>
                 Run now
               </button>
             </li>
           ))}
         </ul>
+        {tasks.some((t) => t.status === "completed") && (
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Completed automation tasks appear under Approval inbox → Completed.
+          </p>
+        )}
       </section>
 
       <section className="rounded-xl border bg-white p-5">

@@ -9,6 +9,7 @@ import {
   mergeGrantedScopes,
   invalidateCapabilityCache,
   scopesForConsent,
+  delegatedScopesFromToken,
 } from "@tuesday/m365";
 import {
   getSessionUserIdFromRequest,
@@ -79,7 +80,10 @@ export async function GET(request: Request) {
     const profile = await fetchMicrosoftProfile(result.accessToken);
     const account = result.account;
     const prior = getMicrosoftAccount(sessionId);
-    const fromToken = result.scopes?.length ? result.scopes : [];
+    const fromToken = delegatedScopesFromToken(
+      result.accessToken,
+      result.scopes?.length ? result.scopes : scopes
+    );
     saveMicrosoftAccount({
       sessionUserId: sessionId,
       homeAccountId: account?.homeAccountId ?? profile.id,
@@ -87,10 +91,12 @@ export async function GET(request: Request) {
       email: profile.email || account?.username || "",
       tenantId: account?.tenantId ?? "common",
       authAuthoritySegment: pending.authAuthoritySegment ?? prior?.authAuthoritySegment,
-      grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken.length ? fromToken : []),
+      grantedScopes: mergeGrantedScopes(prior?.grantedScopes, fromToken),
       connectedAt: prior?.connectedAt ?? new Date().toISOString(),
     });
     invalidateCapabilityCache(sessionId);
+    const { syncOutlookTimeZoneOnAccount } = await import("@tuesday/m365");
+    await syncOutlookTimeZoneOnAccount(sessionId).catch(() => null);
 
     const returnTo = pending.returnTo?.startsWith("/") ? pending.returnTo : "/autopilot";
     const qs = new URLSearchParams();

@@ -44,3 +44,14 @@ export function saveCalendarWeekCache(
 export function getCalendarWeekCache(userId: string) {
   return readFile()[userId] ?? null;
 }
+
+/** Prefer this user's cache; else any non-empty cached week (saved real Outlook data). */
+export function getBestCalendarWeekFallback(userId: string) {
+  const file = readFile();
+  const own = file[userId];
+  if (own?.events?.length) return own;
+  for (const entry of Object.values(file)) {
+    if (entry?.events?.length) return entry;
+  }
+  return null;
+}

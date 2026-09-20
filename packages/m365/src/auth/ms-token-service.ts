@@ -3,8 +3,9 @@ import { createMsalClient, loadMsalCacheIntoClient, persistMsalCacheFromClient }
 import { getMicrosoftAccount } from "./account-store";
 import { M365AuthError } from "./errors";
 import { M365_SCOPES_CALENDAR, M365_SCOPES_MAIL, mergeGrantedScopes } from "./scopes";
-import { scopesFromAccessToken } from "./token-scopes";
+import { delegatedScopesFromToken, scopesFromAccessToken } from "./token-scopes";
 import { saveMicrosoftAccount } from "./account-store";
+import { effectiveAuthAuthoritySegmentForAccount } from "./authority";
 
 function mapMsalError(e: unknown, requiredScopes: string[]): never {
   const msg = e instanceof Error ? e.message : String(e);
@@ -37,7 +38,7 @@ async function acquireForAccount(
   if (!link) {
     throw new M365AuthError("Microsoft 365 is not connected.", "reauth_required");
   }
-  const authoritySegment = link.authAuthoritySegment?.trim() || undefined;
+  const authoritySegment = effectiveAuthAuthoritySegmentForAccount(link);
   const client = createMsalClient({ authoritySegment });
   await loadMsalCacheIntoClient(client, sessionUserId);
   const cache = client.getTokenCache();
@@ -74,13 +75,36 @@ function syncTokenScopesToAccount(
 ) {
   const link = getMicrosoftAccount(sessionUserId);
   if (!link) return;
-  const fromJwt = scopesFromAccessToken(accessToken);
-  const incoming = msalScopes?.length ? msalScopes : fromJwt;
+  const incoming = delegatedScopesFromToken(accessToken, msalScopes);
   if (!incoming.length) return;
   saveMicrosoftAccount({
     ...link,
     grantedScopes: mergeGrantedScopes(link.grantedScopes, incoming),
   });
+}
+
+export type GraphTokenBundle = {
+  accessToken: string;
+  /** Scopes from token / MSAL only. */
+  delegatedScopes: string[];
+  /** Token + MSAL + stored OAuth grants (handles opaque access tokens). */
+  effectiveScopes: string[];
+};
+
+export async function acquireGraphTokenBundle(
+  sessionUserId: string,
+  scopeGroup: "user" | "calendar" | "mail" = "user",
+  options?: { forceRefresh?: boolean }
+): Promise<GraphTokenBundle> {
+  const link = getMicrosoftAccount(sessionUserId);
+  const base = ["User.Read"];
+  let scopes: string[] = base;
+  if (scopeGroup === "calendar") scopes = [...base, ...M365_SCOPES_CALENDAR];
+  if (scopeGroup === "mail") scopes = [...base, ...M365_SCOPES_MAIL];
+  const result = await acquireForAccount(sessionUserId, scopes, options?.forceRefresh === true);
+  const delegatedScopes = delegatedScopesFromToken(result.accessToken, result.scopes);
+  const effectiveScopes = mergeGrantedScopes(link?.grantedScopes, delegatedScopes);
+  return { accessToken: result.accessToken, delegatedScopes, effectiveScopes };
 }
 
 export async function getGraphAccessToken(
@@ -94,17 +118,22 @@ export async function getGraphAccessToken(
   if (scopeGroup === "calendar") scopes = [...base, ...M365_SCOPES_CALENDAR];
   if (scopeGroup === "mail") scopes = [...base, ...M365_SCOPES_MAIL];
   const result = await acquireForAccount(sessionUserId, scopes, options?.forceRefresh === true);
-  const tokenScopes = scopesFromAccessToken(result.accessToken);
-  if (scopeGroup === "calendar" && !tokenScopes.some((g) => g.includes("Calendars"))) {
+  const tokenScopes = mergeGrantedScopes(
+    link?.grantedScopes,
+    delegatedScopesFromToken(result.accessToken, result.scopes)
+  );
+  const scopeGranted = (needle: string) =>
+    tokenScopes.some((g) => g.includes(needle)) || scopes.some((g) => g.includes(needle));
+  if (scopeGroup === "calendar" && !scopeGranted("Calendars")) {
     throw new M365AuthError(
-      "Calendar permission is not on your Microsoft token. Use Connect calendar and accept Calendars.Read.",
+      "Please connect your calendar and choose Allow when Microsoft asks to view your calendar.",
       "insufficient_scope",
       [...M365_SCOPES_CALENDAR]
     );
   }
-  if (scopeGroup === "mail" && !tokenScopes.some((g) => g.includes("Mail"))) {
+  if (scopeGroup === "mail" && !scopeGranted("Mail")) {
     throw new M365AuthError(
-      "Mail permission is not on your Microsoft token. Use Connect mail and accept Mail.Read / Mail.Send.",
+      "Please connect mail and choose Allow when Microsoft asks to read and send email.",
       "insufficient_scope",
       [...M365_SCOPES_MAIL]
     );

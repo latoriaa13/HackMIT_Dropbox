@@ -1,8 +1,15 @@
+import { isGuestExternalMicrosoftEmail } from "./authority";
 import { getMicrosoftAccount, saveMicrosoftAccount } from "./account-store";
-import { getGraphAccessToken } from "./ms-token-service";
-import { hasCalendarScopes, hasMailScopes, mergeGrantedScopes } from "./scopes";
+import { acquireGraphTokenBundle, getGraphAccessToken } from "./ms-token-service";
+import { hasCalendarScopes, hasMailScopes, hasMailSendScope, mergeGrantedScopes } from "./scopes";
 import { isM365AuthError } from "./errors";
-import { scopesFromAccessToken } from "./token-scopes";
+import {
+  CONNECTION_COPY,
+  graphErrorCodeMessage,
+  graphFailureMessage,
+  messageFromAuthError,
+  type ConnectionArea,
+} from "./user-connection-messages";
 
 export type GraphCapabilityProbe = {
   profile: boolean;
@@ -29,53 +36,46 @@ export type GraphCapabilityProbe = {
 };
 
 const cache = new Map<string, { at: number; probe: GraphCapabilityProbe }>();
+const inflight = new Map<string, Promise<GraphCapabilityProbe>>();
 const CACHE_MS = 45_000;
 
-function syncScopesFromToken(sessionUserId: string, accessToken: string) {
-  const fromJwt = scopesFromAccessToken(accessToken);
-  if (!fromJwt.length) return;
+function syncScopesFromBundle(sessionUserId: string, effectiveScopes: string[]) {
+  if (!effectiveScopes.length) return;
   const account = getMicrosoftAccount(sessionUserId);
   if (!account) return;
   saveMicrosoftAccount({
     ...account,
-    grantedScopes: mergeGrantedScopes(account.grantedScopes, fromJwt),
+    grantedScopes: mergeGrantedScopes(account.grantedScopes, effectiveScopes),
   });
 }
 
-async function graphGet(url: string, token: string): Promise<Response> {
+async function graphGet(url: string, token: string, outlookTimeZone?: string): Promise<Response> {
+  const preferTz = outlookTimeZone?.replace(/"/g, "") ?? "UTC";
   return fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
-      Prefer: 'outlook.timezone="UTC"',
+      Prefer: `outlook.timezone="${preferTz}"`,
     },
   });
 }
 
-function friendlyGraphError(status: number, scope: string, detail?: string, code?: string): string {
-  if (status === 403) {
-    return `${scope}: Microsoft Graph denied access (403). In Azure Portal → App registration → API permissions, add delegated ${scope} and grant admin consent, then use Connect calendar/mail again.`;
-  }
-  if (status === 401) {
-    if (code === "InvalidAuthenticationToken") {
-      return `${scope}: Microsoft rejected the access token (401). Disconnect, then Reconnect (all permissions). If this repeats, sign out of Microsoft in the browser and pick the account you use at outlook.com — Personal account, not Work/school guest (#EXT#).`;
-    }
-    return `${scope}: Microsoft Graph rejected this request (401${code ? `, ${code}` : ""}). Tuesday only reads calendars stored in Microsoft's cloud for the exact account you signed into — not Gmail calendars synced into the Outlook app unless that Gmail is a personal Microsoft account. Guest (#EXT#) work/school sign-ins usually need an Exchange mailbox in Azure; events you see from a connected Gmail account may not appear here.`;
-  }
-  return detail ? `${scope}: Graph request failed (${status}). ${detail}` : `${scope}: Graph request failed (${status}).`;
-}
-
 type GraphErrorBody = { error?: { code?: string; message?: string } };
 
-function explainGraphFailure(status: number, scope: string, body?: GraphErrorBody): string {
+function explainGraphFailure(status: number, area: ConnectionArea, body?: GraphErrorBody): string {
   const code = body?.error?.code ?? "";
   const msg = body?.error?.message ?? "";
   if (code === "MailboxNotEnabledForRESTAPI" || msg.includes("MailboxNotEnabledForRESTAPI")) {
-    return `${scope}: This signed-in identity has no Outlook/Exchange mailbox. Tuesday cannot read calendar or mail for guest (#EXT#) or directory-only accounts. Sign in with @outlook.com or a work/school Microsoft 365 account that has Outlook.`;
+    return graphErrorCodeMessage(area, "MailboxNotEnabledForRESTAPI")!;
   }
-  if (code === "ResourceNotFound" && scope.includes("Calendar")) {
-    return `${scope}: No default calendar found for this account. Use a Microsoft account with an active Outlook calendar.`;
+  if (code === "ResourceNotFound" && area === "calendar") {
+    return graphErrorCodeMessage(area, "ResourceNotFound")!;
   }
-  return friendlyGraphError(status, scope, msg || undefined, code || undefined);
+  if (msg.toLowerCase().includes("admin consent") || code.includes("Authorization_RequestDenied")) {
+    return CONNECTION_COPY.adminNeeded;
+  }
+  const byCode = code ? graphErrorCodeMessage(area, code, msg) : null;
+  if (byCode) return byCode;
+  return graphFailureMessage(area, status, code || undefined);
 }
 
 async function graphGetAuthed(
@@ -89,12 +89,14 @@ async function graphGetAuthed(
   userMessage?: string;
   errorCode?: string;
 }> {
+  const account = getMicrosoftAccount(sessionUserId);
+  const preferTz = account?.outlookTimeZone;
   let token = await getGraphAccessToken(sessionUserId, scopeGroup);
-  let res = await graphGet(url, token);
+  let res = await graphGet(url, token, preferTz);
   if (res.status === 401) {
     invalidateCapabilityCache(sessionUserId);
     token = await getGraphAccessToken(sessionUserId, scopeGroup, { forceRefresh: true });
-    res = await graphGet(url, token);
+    res = await graphGet(url, token, preferTz);
   }
   let body: GraphErrorBody | undefined;
   if (!res.ok) {
@@ -104,26 +106,18 @@ async function graphGetAuthed(
       body = undefined;
     }
   }
-  const scopeLabel =
-    scopeGroup === "calendar" ? "Calendars.Read" : scopeGroup === "mail" ? "Mail.Read" : "User.Read";
+  const area: ConnectionArea =
+    scopeGroup === "calendar" ? "calendar" : scopeGroup === "mail" ? "mail" : "profile";
   return {
     ok: res.ok,
     status: res.status,
     detail: body?.error?.message,
     errorCode: body?.error?.code,
-    userMessage: res.ok ? undefined : explainGraphFailure(res.status, scopeLabel, body),
+    userMessage: res.ok ? undefined : explainGraphFailure(res.status, area, body),
   };
 }
 
-export async function probeGraphCapabilities(
-  sessionUserId: string,
-  options?: { force?: boolean }
-): Promise<GraphCapabilityProbe> {
-  const cached = cache.get(sessionUserId);
-  if (!options?.force && cached && Date.now() - cached.at < CACHE_MS) {
-    return cached.probe;
-  }
-
+async function runGraphCapabilityProbe(sessionUserId: string): Promise<GraphCapabilityProbe> {
   const errors: GraphCapabilityProbe["errors"] = {};
   const graphErrorCodes: NonNullable<GraphCapabilityProbe["graphErrorCodes"]> = {};
   let identity: GraphCapabilityProbe["identity"];
@@ -142,7 +136,7 @@ export async function probeGraphCapabilities(
       mailSend: false,
       checkedAt: new Date().toISOString(),
       tokenScopes: [],
-      errors: { profile: "No Microsoft account linked." },
+      errors: { profile: CONNECTION_COPY.notConnected },
     };
     return empty;
   }
@@ -153,11 +147,11 @@ export async function probeGraphCapabilities(
     const me = await graphGetAuthed(sessionUserId, "user", meUrl);
     profile = me.ok;
     if (me.ok) {
-      const userToken = await getGraphAccessToken(sessionUserId, "user");
-      syncScopesFromToken(sessionUserId, userToken);
-      tokenScopes = scopesFromAccessToken(userToken);
+      const userBundle = await acquireGraphTokenBundle(sessionUserId, "user");
+      syncScopesFromBundle(sessionUserId, userBundle.effectiveScopes);
+      tokenScopes = userBundle.effectiveScopes;
       try {
-        const meRes = await graphGet(meUrl, userToken);
+        const meRes = await graphGet(meUrl, userBundle.accessToken);
         if (meRes.ok) {
           const data = (await meRes.json()) as {
             userPrincipalName?: string;
@@ -175,10 +169,10 @@ export async function probeGraphCapabilities(
       }
     } else {
       if (me.errorCode) graphErrorCodes.profile = me.errorCode;
-      errors.profile = me.userMessage ?? friendlyGraphError(me.status, "User.Read", me.detail, me.errorCode);
+      errors.profile = me.userMessage ?? graphFailureMessage("profile", me.status, me.errorCode);
     }
   } catch (e) {
-    errors.profile = isM365AuthError(e) ? e.message : "Could not verify Microsoft profile.";
+    errors.profile = messageFromAuthError(e, "profile");
   }
 
   try {
@@ -188,18 +182,15 @@ export async function probeGraphCapabilities(
     const res = await graphGetAuthed(sessionUserId, "calendar", url);
     calendar = res.ok;
     if (res.ok) {
-      const calToken = await getGraphAccessToken(sessionUserId, "calendar");
-      syncScopesFromToken(sessionUserId, calToken);
-      tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(calToken));
+      const calBundle = await acquireGraphTokenBundle(sessionUserId, "calendar");
+      syncScopesFromBundle(sessionUserId, calBundle.effectiveScopes);
+      tokenScopes = mergeGrantedScopes(tokenScopes, calBundle.effectiveScopes);
     } else {
       if (res.errorCode) graphErrorCodes.calendar = res.errorCode;
-      errors.calendar =
-        res.userMessage ?? friendlyGraphError(res.status, "Calendars.Read", res.detail, res.errorCode);
+      errors.calendar = res.userMessage ?? graphFailureMessage("calendar", res.status, res.errorCode);
     }
   } catch (e) {
-    errors.calendar = isM365AuthError(e)
-      ? e.message
-      : "Calendar access failed — connect calendar permissions.";
+    errors.calendar = messageFromAuthError(e, "calendar");
   }
 
   try {
@@ -210,21 +201,19 @@ export async function probeGraphCapabilities(
     );
     mail = res.ok;
     if (res.ok) {
-      const mailToken = await getGraphAccessToken(sessionUserId, "mail");
-      syncScopesFromToken(sessionUserId, mailToken);
-      tokenScopes = mergeGrantedScopes(tokenScopes, scopesFromAccessToken(mailToken));
-      const scopes = scopesFromAccessToken(mailToken);
-      mailSend = scopes.some((s) => s === "Mail.Send" || s.includes("Mail.Send"));
+      const mailBundle = await acquireGraphTokenBundle(sessionUserId, "mail");
+      syncScopesFromBundle(sessionUserId, mailBundle.effectiveScopes);
+      tokenScopes = mergeGrantedScopes(tokenScopes, mailBundle.effectiveScopes);
+      mailSend = hasMailSendScope(mailBundle.effectiveScopes);
       if (!mailSend) {
-        errors.mail =
-          "Mail.Send is not on your token — reconnect with mail permissions to send email.";
+        errors.mail = CONNECTION_COPY.mailSendPending;
       }
     } else {
       if (res.errorCode) graphErrorCodes.mail = res.errorCode;
-      errors.mail = res.userMessage ?? friendlyGraphError(res.status, "Mail.Read", res.detail, res.errorCode);
+      errors.mail = res.userMessage ?? graphFailureMessage("mail", res.status, res.errorCode);
     }
   } catch (e) {
-    errors.mail = isM365AuthError(e) ? e.message : "Mail access failed — connect mail permissions.";
+    errors.mail = messageFromAuthError(e, "mail");
   }
 
   const probe: GraphCapabilityProbe = {
@@ -243,24 +232,75 @@ export async function probeGraphCapabilities(
   return probe;
 }
 
+export async function probeGraphCapabilities(
+  sessionUserId: string,
+  options?: { force?: boolean }
+): Promise<GraphCapabilityProbe> {
+  const cached = cache.get(sessionUserId);
+  if (!options?.force && cached && Date.now() - cached.at < CACHE_MS) {
+    return cached.probe;
+  }
+
+  if (!options?.force) {
+    const pending = inflight.get(sessionUserId);
+    if (pending) return pending;
+  }
+
+  const run = runGraphCapabilityProbe(sessionUserId).finally(() => {
+    inflight.delete(sessionUserId);
+  });
+  if (!options?.force) inflight.set(sessionUserId, run);
+  return run;
+}
+
 export function invalidateCapabilityCache(sessionUserId: string) {
   cache.delete(sessionUserId);
+  inflight.delete(sessionUserId);
+}
+
+/** Fast flags from last OAuth scopes — no live Graph calls (for per-row UI). */
+export function connectionFlagsFromStoredAccount(sessionUserId: string) {
+  const account = getMicrosoftAccount(sessionUserId);
+  const accountLinked = !!account;
+  const guest = isGuestExternalMicrosoftEmail(account?.email);
+  const scopes = account?.grantedScopes ?? [];
+  const calendarScoped = hasCalendarScopes(scopes);
+  const mailScoped = hasMailScopes(scopes);
+  const sendScoped = hasMailSendScope(scopes);
+  const mailOk = accountLinked && mailScoped && sendScoped && !guest;
+  return {
+    accountLinked,
+    profileReady: accountLinked,
+    calendarReady: accountLinked && calendarScoped,
+    mailReady: mailOk,
+    mailReadReady: accountLinked && mailScoped && !guest,
+    outlookReady: accountLinked && calendarScoped,
+    mailAutopilotReady: mailOk,
+    missingCalendarConsent: accountLinked && !calendarScoped,
+    missingMailConsent: accountLinked && (guest || !mailScoped || !sendScoped),
+  };
 }
 
 /** UI/API: derived flags from live Graph probes (not stored scope guesses). */
-export function connectionFlagsFromProbe(probe: GraphCapabilityProbe, accountLinked: boolean) {
+export function connectionFlagsFromProbe(
+  probe: GraphCapabilityProbe,
+  accountLinked: boolean,
+  accountEmail?: string | null
+) {
+  const guest = isGuestExternalMicrosoftEmail(accountEmail);
+  const mailOk = !guest && probe.profile && probe.mail && probe.mailSend;
   return {
     accountLinked,
     profileReady: probe.profile,
     calendarReady: probe.calendar,
-    mailReady: probe.mail && probe.mailSend,
-    mailReadReady: probe.mail,
+    mailReady: mailOk,
+    mailReadReady: !guest && probe.mail,
     /** Weekly plan / Outlook card — calendar must work. */
     outlookReady: probe.profile && probe.calendar,
     /** Autopilot email send path. */
-    mailAutopilotReady: probe.profile && probe.mail && probe.mailSend,
+    mailAutopilotReady: mailOk,
     missingCalendarConsent: accountLinked && !probe.calendar,
-    missingMailConsent: accountLinked && (!probe.mail || !probe.mailSend),
+    missingMailConsent: accountLinked && (guest || !probe.mail || !probe.mailSend),
     capabilities: probe,
   };
 }

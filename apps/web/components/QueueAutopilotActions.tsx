@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import type { QueueItem } from "@tuesday/core";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
+import { useM365Session, type SharedM365Session } from "@/components/M365SessionContext";
 
 type M365Session = {
   connected: boolean;
   mailAutopilotReady?: boolean;
+  calendarReady?: boolean;
+  outlookReady?: boolean;
   accountLinked?: boolean;
   canStartOAuth?: boolean;
   configurationError?: boolean;
@@ -16,17 +19,28 @@ type M365Session = {
   message?: string;
 };
 
-export function QueueAutopilotActions({ item }: { item: QueueItem }) {
+export function QueueAutopilotActions({
+  item,
+  session: sessionProp,
+}: {
+  item: QueueItem;
+  session?: SharedM365Session | null;
+}) {
+  const ctx = useM365Session();
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [m365, setM365] = useState<M365Session | null>(null);
+  const [localM365, setLocalM365] = useState<M365Session | null>(null);
   const [slots, setSlots] = useState<Array<{ start: string; end: string }>>([]);
 
+  const shared = sessionProp ?? ctx?.session ?? null;
+  const m365 = (shared as M365Session | null) ?? localM365;
+
   useEffect(() => {
+    if (shared) return;
     fetch("/api/auth/microsoft/session")
       .then((r) => r.json())
-      .then(setM365);
-  }, []);
+      .then(setLocalM365);
+  }, [shared]);
 
   const mailReady = m365?.mailAutopilotReady === true;
   const calendarReady = m365?.calendarReady === true;
@@ -95,7 +109,7 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
   if (m365?.configurationError) {
     return (
       <div className="mt-3 border-t pt-3 text-xs text-amber-900">
-        Microsoft Entra is not configured on this server. Set MICROSOFT_CLIENT_ID in `.env.local`.
+        Outlook sign-in isn’t set up for this app yet.
       </div>
     );
   }
@@ -104,7 +118,7 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
     return (
       <div className="mt-3 border-t pt-3">
         <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
-        <p className="mt-1 text-xs text-amber-900">Microsoft signed in — connect mail or calendar to use Autopilot actions.</p>
+        <p className="mt-1 text-xs text-amber-900">You’re signed in — connect mail or calendar to use these actions.</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <MicrosoftPermissionConnect consent="mail" returnTo="/" label="Connect mail" className="!px-2 !py-1 !text-xs" />
           <MicrosoftPermissionConnect consent="calendar" returnTo="/" label="Connect calendar" className="!px-2 !py-1 !text-xs" />
@@ -117,12 +131,12 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
     return (
       <div className="mt-3 border-t pt-3">
         <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot</p>
-        <p className="mt-1 text-xs text-amber-900">Microsoft 365 connection required.</p>
+        <p className="mt-1 text-xs text-amber-900">Connect Outlook to draft email or find meeting times.</p>
         <div className="mt-2">
           <MicrosoftPermissionConnect
             consent="full"
             returnTo="/"
-            label="Connect Microsoft 365"
+            label="Connect Outlook"
             variant="primary"
             className="!px-3 !py-1 !text-xs"
           />
@@ -133,7 +147,7 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
 
   return (
     <div className="mt-3 border-t pt-3">
-      <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot · Microsoft Graph</p>
+      <p className="text-xs font-semibold uppercase text-[var(--muted)]">Autopilot · Outlook</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
@@ -159,13 +173,16 @@ export function QueueAutopilotActions({ item }: { item: QueueItem }) {
         </a>
       </div>
       {!canMail && m365?.accountLinked && (
-        <a href="/api/auth/microsoft/connect?consent=mail" className="mt-1 block text-xs text-[var(--accent)]">
-          Mail access required
+        <a
+          href="/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot"
+          className="mt-1 block text-xs text-[var(--accent)]"
+        >
+          Connect mail to draft email
         </a>
       )}
       {!canCalendar && m365?.accountLinked && (
         <a href="/api/auth/microsoft/connect?consent=calendar" className="mt-1 block text-xs text-[var(--accent)]">
-          Calendar access required
+          Connect calendar for meeting times
         </a>
       )}
       {msg && <p className="mt-2 text-xs text-stone-600">{msg}</p>}

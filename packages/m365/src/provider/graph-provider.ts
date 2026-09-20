@@ -31,11 +31,22 @@ import {
 } from "../storage/draft-store";
 import { appendAudit } from "../storage/audit-log";
 import { computeFreeSlots } from "../calendar/compute-free-slots";
+import { completeScheduleTaskByOutlookDraft } from "../scheduling/schedule-task-approve";
+import { wallClockInZoneToUtcIso, assertIanaZone } from "@tuesday/core";
+import { windowsTimeZoneToIana, getOutlookTimeZoneContext } from "../calendar/outlook-timezone";
+import { DateTime } from "luxon";
+import { M365_SCOPES_CALENDAR, M365_SCOPES_MAIL } from "../auth/scopes";
+import { CONNECTION_COPY, scopeMissingMessage } from "../auth/user-connection-messages";
 
 function graphClient(accessToken: string) {
   return Client.init({
     authProvider: (done) => done(null, accessToken),
   });
+}
+
+function utcIsoToGraphLocalDateTime(utcIso: string, ianaZone: string): string {
+  const zone = assertIanaZone(ianaZone);
+  return DateTime.fromISO(utcIso, { zone: "utc" }).setZone(zone).toFormat("yyyy-MM-dd'T'HH:mm:ss");
 }
 
 async function withGraph<T>(
@@ -44,13 +55,37 @@ async function withGraph<T>(
   fn: (token: string) => Promise<T>
 ): Promise<T> {
   try {
-    const token = await getGraphAccessToken(sessionUserId, scopeGroup);
-    return await fn(token);
+    let token = await getGraphAccessToken(sessionUserId, scopeGroup);
+    try {
+      return await fn(token);
+    } catch (inner) {
+      const msg = inner instanceof Error ? inner.message : String(inner);
+      if (msg.includes("401") || msg.toLowerCase().includes("invalidauthenticationtoken")) {
+        token = await getGraphAccessToken(sessionUserId, scopeGroup, { forceRefresh: true });
+        return await fn(token);
+      }
+      throw inner;
+    }
   } catch (e) {
     if (isM365AuthError(e)) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("401") || msg.includes("403")) {
-      throw new M365AuthError("Microsoft Graph rejected this request — check consent.", "insufficient_scope");
+    if (msg.includes("401")) {
+      throw new M365AuthError(CONNECTION_COPY.signInExpired, "reauth_required");
+    }
+    if (msg.includes("403")) {
+      const missingScopes =
+        scopeGroup === "calendar"
+          ? [...M365_SCOPES_CALENDAR]
+          : scopeGroup === "mail"
+            ? [...M365_SCOPES_MAIL]
+            : [];
+      const message =
+        scopeGroup === "calendar"
+          ? scopeMissingMessage("calendar")
+          : scopeGroup === "mail"
+            ? scopeMissingMessage("mail")
+            : CONNECTION_COPY.signInExpired;
+      throw new M365AuthError(message, "insufficient_scope", missingScopes);
     }
     throw new M365AuthError(msg, "graph_error");
   }
@@ -85,16 +120,18 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
   async listUpcomingEvents(input: ListEventsInput): Promise<CalendarEvent[]> {
     return withGraph(this.sessionUserId, "calendar", async (accessToken) => {
       const client = graphClient(accessToken);
+      const preferTz = input.outlookTimeZone ?? "UTC";
       const res = await client
         .api("/me/calendarView")
+        .header("Prefer", `outlook.timezone="${preferTz}"`)
         .query({ startDateTime: input.start, endDateTime: input.end })
         .get();
       return (res.value ?? []).map(
         (ev: {
           id: string;
           subject: string;
-          start: { dateTime: string };
-          end: { dateTime: string };
+          start: { dateTime: string; timeZone?: string };
+          end: { dateTime: string; timeZone?: string };
           location?: { displayName?: string };
           isAllDay?: boolean;
           showAs?: string;
@@ -106,11 +143,15 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
             ev.sensitivity === "confidential" ||
             ev.sensitivity === "personal";
           const subject = isPrivate ? "Busy / private event" : ev.subject || "Busy";
+          const startZone = ev.start.timeZone
+            ? windowsTimeZoneToIana(ev.start.timeZone)
+            : input.timezone;
+          const endZone = ev.end.timeZone ? windowsTimeZoneToIana(ev.end.timeZone) : input.timezone;
           return {
             id: ev.id,
             subject,
-            start: ev.start.dateTime,
-            end: ev.end.dateTime,
+            start: wallClockInZoneToUtcIso(ev.start.dateTime, startZone),
+            end: wallClockInZoneToUtcIso(ev.end.dateTime, endZone),
             timezone: input.timezone,
             location: isPrivate ? undefined : ev.location?.displayName,
             isAllDay: ev.isAllDay,
@@ -153,19 +194,24 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
     }
     const draft = getEventDraft(input.draftId, this.sessionUserId);
     if (!draft) throw new Error("Draft not found");
+    const { windows: outlookWindows } = await getOutlookTimeZoneContext(this.sessionUserId);
+    const graphTz = draft.timezone.includes("/") ? outlookWindows : draft.timezone;
+    const startLocal = utcIsoToGraphLocalDateTime(draft.start, draft.timezone);
+    const endLocal = utcIsoToGraphLocalDateTime(draft.end, draft.timezone);
     return withGraph(this.sessionUserId, "calendar", async (accessToken) => {
       const client = graphClient(accessToken);
       const created = await client.api("/me/events").post({
         subject: draft.subject,
         body: { contentType: "Text", content: draft.body },
-        start: { dateTime: draft.start, timeZone: draft.timezone },
-        end: { dateTime: draft.end, timeZone: draft.timezone },
+        start: { dateTime: startLocal, timeZone: graphTz },
+        end: { dateTime: endLocal, timeZone: graphTz },
         attendees: draft.attendees.map((email) => ({
           emailAddress: { address: email },
           type: "required",
         })),
       });
       removeEventDraft(input.draftId);
+      completeScheduleTaskByOutlookDraft(this.sessionUserId, input.draftId);
       appendAudit({
         userId: this.sessionUserId,
         actionType: "calendar.send_event_invitation",
@@ -227,14 +273,16 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
     if (!draft) throw new Error("Draft not found");
     return withGraph(this.sessionUserId, "mail", async (accessToken) => {
       const client = graphClient(accessToken);
-      const created = await client.api("/me/messages").post({
-        subject: draft.subject,
-        body: { contentType: "Text", content: draft.body },
-        toRecipients: draft.to.map((address) => ({
-          emailAddress: { address },
-        })),
+      await client.api("/me/sendMail").post({
+        message: {
+          subject: draft.subject,
+          body: { contentType: "Text", content: draft.body },
+          toRecipients: draft.to.map((address) => ({
+            emailAddress: { address },
+          })),
+        },
+        saveToSentItems: true,
       });
-      await client.api(`/me/messages/${created.id}/send`).post({});
       removeEmailDraft(input.draftId);
       appendAudit({
         userId: this.sessionUserId,
@@ -245,10 +293,10 @@ export class MicrosoftGraphProvider implements Microsoft365Provider {
         executedAt: new Date().toISOString(),
       });
       return {
-        messageId: created.id,
+        messageId: "sendMail",
         draftId: input.draftId,
         status: "sent_graph",
-        message: "Email sent via Microsoft Graph.",
+        message: `Email sent to ${draft.to.join(", ")} via Microsoft Graph. Check Sent Items in Outlook and the recipient inbox (including spam).`,
       };
     });
   }

@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
-import {
-  getPublicM365Session,
-  isMicrosoft365Connected,
-  probeGraphCapabilities,
-  connectionFlagsFromProbe,
-} from "@tuesday/m365";
+import { isMicrosoft365Connected, resolveConnectionStatus } from "@tuesday/m365";
 import { getSessionUserId } from "@/lib/session";
 
 export async function GET(request: Request) {
   const sessionUserId = await getSessionUserId();
-  const pub = getPublicM365Session(sessionUserId);
   const url = new URL(request.url);
+  const verify = url.searchParams.get("verify") === "1";
   const forceProbe = url.searchParams.get("verify") === "1";
 
   if (!isMicrosoft365Connected(sessionUserId)) {
+    const resolved = await resolveConnectionStatus(sessionUserId, { verify: false });
+    const pub = resolved.pub;
     return NextResponse.json({
       connected: false,
       accountLinked: false,
@@ -33,49 +30,55 @@ export async function GET(request: Request) {
       connectUrl: pub.connectUrl,
       missingCalendarConsent: true,
       missingMailConsent: true,
+      verified: false,
     });
   }
 
-  const probe = await probeGraphCapabilities(sessionUserId, { force: forceProbe });
-  const flags = connectionFlagsFromProbe(probe, true);
-
+  const resolved = await resolveConnectionStatus(sessionUserId, { verify, forceProbe });
+  const pub = resolved.pub;
+  const probe = resolved.probe;
   const email = pub.email ?? "";
   const isGuestExternal = email.includes("#EXT#") || email.includes("#ext#");
 
   return NextResponse.json({
-    connected: flags.outlookReady,
-    accountLinked: true,
+    connected: resolved.connected,
+    accountLinked: resolved.accountLinked,
     isGuestExternalAccount: isGuestExternal,
-    outlookReady: flags.outlookReady,
-    mailAutopilotReady: flags.mailAutopilotReady,
-    profileReady: flags.profileReady,
-    calendarReady: flags.calendarReady,
-    mailReady: flags.mailReady,
-    mailReadReady: flags.mailReadReady,
+    outlookReady: resolved.outlookReady,
+    mailAutopilotReady: resolved.mailAutopilotReady,
+    profileReady: resolved.profileReady,
+    calendarReady: resolved.calendarReady,
+    mailReady: resolved.mailReady,
+    mailReadReady: resolved.mailReadReady,
+    verified: resolved.verified,
     mode: "microsoft_graph",
     accountEmail: pub.email ?? null,
     accountName: pub.displayName ?? null,
-    grantedScopes: probe.tokenScopes.length ? probe.tokenScopes : pub.grantedScopes ?? [],
+    grantedScopes: resolved.grantedScopes,
     configured: pub.oauthConfigured,
-    message: flags.outlookReady
-      ? "Outlook calendar verified — schedule and availability use live Graph data."
-      : flags.mailAutopilotReady
-        ? "Mail verified — calendar still needs Connect calendar."
-        : "Microsoft account linked — grant calendar and/or mail permissions to unlock features.",
+    message: isGuestExternal
+      ? "This Microsoft sign-in can't send email. Disconnect, then use Connect personal Outlook and choose your @outlook.com account."
+      : resolved.outlookReady
+        ? "Your Outlook calendar is connected. Your weekly plan uses your real availability."
+        : resolved.mailAutopilotReady
+          ? "Your email is connected. Connect calendar on the home page to build a schedule around Outlook."
+          : resolved.accountLinked
+            ? "You're signed in to Microsoft. Connect personal Outlook (email) to send from Autopilot."
+            : pub.message,
     oauthConfigured: pub.oauthConfigured,
     canStartOAuth: pub.canStartOAuth,
     provider: pub.provider,
     displayName: pub.displayName,
     email: pub.email,
     tenantId: pub.tenantId,
-    missingCalendarConsent: flags.missingCalendarConsent,
-    missingMailConsent: flags.missingMailConsent,
-    capabilityErrors: probe.errors,
-    graphErrorCodes: probe.graphErrorCodes ?? null,
-    microsoftIdentity: probe.identity ?? null,
-    calendarNotReadyReason: probe.errors.calendar ?? null,
-    mailNotReadyReason: probe.errors.mail ?? null,
-    capabilitiesCheckedAt: probe.checkedAt,
+    missingCalendarConsent: resolved.missingCalendarConsent,
+    missingMailConsent: resolved.missingMailConsent,
+    capabilityErrors: resolved.capabilityErrors,
+    graphErrorCodes: probe?.graphErrorCodes ?? null,
+    microsoftIdentity: probe?.identity ?? null,
+    calendarNotReadyReason: resolved.capabilityErrors.calendar ?? null,
+    mailNotReadyReason: resolved.capabilityErrors.mail ?? null,
+    capabilitiesCheckedAt: probe?.checkedAt ?? null,
     configErrors: pub.configErrors,
     connectUrl: pub.connectUrl,
   });

@@ -30,8 +30,9 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
       oauthConfigured: false,
       canStartOAuth: false,
       configurationError: true,
-      message: "Microsoft Entra configuration is missing. Autopilot requires Microsoft 365.",
-      connectUrl: "/api/auth/microsoft/connect",
+      message: "Tuesday isn't set up for Microsoft sign-in yet.",
+      connectUrl:
+        "/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot",
     };
   }
 
@@ -44,8 +45,9 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
       oauthConfigured,
       canStartOAuth: true,
       configErrors: configErrors.length ? configErrors : undefined,
-      message: "Microsoft 365 connection required — connect to use calendar and mail.",
-      connectUrl: "/api/auth/microsoft/connect",
+      message: "Connect Microsoft Outlook to see your calendar and send email from Tuesday.",
+      connectUrl:
+        "/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot",
     };
   }
 
@@ -62,6 +64,7 @@ export function getPublicM365Session(sessionUserId: string): PublicM365Session {
     canStartOAuth: true,
     missingCalendarConsent: !hasCalendarScopes(scopes),
     missingMailConsent: !hasMailScopes(scopes),
-    connectUrl: "/api/auth/microsoft/connect",
+    connectUrl:
+      "/api/auth/microsoft/connect?consent=mail&accountKind=personal&pickAccount=1&returnTo=%2Fautopilot",
   };
 }

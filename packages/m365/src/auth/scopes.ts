@@ -42,6 +42,10 @@ export function hasMailScopes(granted: string[]): boolean {
   return granted.some((s) => s.includes("Mail.Read") || s.includes("Mail.Send"));
 }
 
+export function hasMailSendScope(granted: string[]): boolean {
+  return granted.some((s) => s === "Mail.Send" || s.includes("Mail.Send"));
+}
+
 /** Union scopes for incremental consent (keep mail when adding calendar, etc.). */
 export function mergeGrantedScopes(existing: string[] | undefined, incoming: string[]): string[] {
   return [...new Set([...(existing ?? []), ...incoming])];

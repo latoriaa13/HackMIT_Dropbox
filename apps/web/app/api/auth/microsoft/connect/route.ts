@@ -5,6 +5,8 @@ import {
   canStartMicrosoftOAuth,
   scopesForIncrementalConsent,
   getMicrosoftAccount,
+  disconnectMicrosoft365,
+  isGuestExternalMicrosoftEmail,
   type ConsentKind,
   authoritySegmentForAccountKind,
   parseAccountKindParam,
@@ -41,17 +43,32 @@ export async function GET(request: Request) {
     consent === "full" ? "/" : "/autopilot"
   );
 
-  const existing = getMicrosoftAccount(sessionId);
+  let existing = getMicrosoftAccount(sessionId);
+  const existingGuest = isGuestExternalMicrosoftEmail(existing?.email);
+
+  let accountKind = parseAccountKindParam(url.searchParams.get("accountKind"));
+  if (!url.searchParams.get("accountKind")) {
+    if (consent === "mail" || consent === "basic" || consent === "full") {
+      accountKind = "personal";
+    }
+  }
+
+  let reauth = url.searchParams.get("reauth") === "1";
+  let pickAccount = url.searchParams.get("pickAccount") === "1";
+
+  if (existingGuest && accountKind === "personal") {
+    disconnectMicrosoft365(sessionId);
+    existing = null;
+    reauth = true;
+    pickAccount = true;
+  }
+
   const scopeList = scopesForIncrementalConsent(consent, existing?.grantedScopes);
-  const reauth = url.searchParams.get("reauth") === "1";
-  const pickAccount = url.searchParams.get("pickAccount") === "1";
-  const accountKind = parseAccountKindParam(url.searchParams.get("accountKind"));
   const authAuthoritySegment = authoritySegmentForAccountKind(accountKind);
   let prompt: "consent" | "select_account" | "login";
   if (reauth) {
     prompt = "login";
-  } else if (!existing || pickAccount) {
-    // Avoid silently reusing a cached Microsoft session (e.g. #EXT# guest) when the user expects to pick an account.
+  } else if (!existing || pickAccount || existingGuest) {
     prompt = "select_account";
   } else if (consent === "calendar" || consent === "mail") {
     prompt = "consent";

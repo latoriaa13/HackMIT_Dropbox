@@ -2,21 +2,22 @@
 
 import { useState } from "react";
 import type { CalendarAwareSchedule, SchedulableFundraisingTask } from "@tuesday/core";
+import { formatTimeRangeInZone } from "@tuesday/core";
 import { formatCurrency } from "@/lib/format";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { WeekPlannerGrid } from "@/components/WeekPlannerGrid";
 
 type ViewMode = "queue" | "schedule" | "split";
 
-function formatRange(start: string, end: string) {
-  const s = new Date(start);
-  const e = new Date(end);
-  return `${s.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–${e.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+function formatRange(start: string, end: string, timezone: string) {
+  return formatTimeRangeInZone(start, end, timezone);
 }
 
 function taskRowClass(task: SchedulableFundraisingTask) {
   if (task.hasCalendarConflict) return "border-red-300 bg-red-50";
   if (task.schedulingStatus === "approved") return "border-green-300 bg-green-50";
+  if (task.schedulingStatus === "completed") return "border-stone-200 bg-stone-50 opacity-80";
   if (task.schedulingStatus === "denied") return "border-stone-200 bg-stone-50 opacity-60";
   return "border-orange-200 bg-orange-50";
 }
@@ -36,9 +37,12 @@ export function CalendarAwareScheduleView({
   onScheduleUpdated: (s: CalendarAwareSchedule) => void;
   staffHours: number;
 }) {
+  const router = useRouter();
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [altTaskId, setAltTaskId] = useState<string | null>(null);
   const [alternatives, setAlternatives] = useState<Array<{ start: string; end: string }>>([]);
+
+  const goAutopilotPending = () => router.push("/autopilot?tab=pending");
 
   const act = async (path: string, method = "POST", body?: unknown) => {
     const res = await fetch(path, {
@@ -70,9 +74,13 @@ export function CalendarAwareScheduleView({
       <div className="rounded-xl border bg-white p-4 text-sm">
         <p className="font-medium">Tuesday plan · {schedule.weekStart} – {schedule.weekEnd}</p>
         <p className="mt-1 text-[var(--muted)]">
-          You have {staffHours} hours budgeted. Outlook shows {schedule.summary.outlookMeetingCount} meetings and{" "}
-          {Math.round(schedule.summary.totalAvailableWorkMinutes / 60)} hours of free work time. Tuesday found{" "}
-          {schedule.summary.tasksProposed} recommended fundraising actions.
+          {staffHours}h fundraising budget · {schedule.preferences.workDays}-day week,{" "}
+          {schedule.preferences.workingHoursStart}:00–{schedule.preferences.workingHoursEnd}:00 (
+          {schedule.preferences.workDays *
+            (schedule.preferences.workingHoursEnd - schedule.preferences.workingHoursStart)}
+          h capacity before Outlook). Outlook shows {schedule.summary.outlookMeetingCount} meetings and{" "}
+          {Math.round(schedule.summary.totalAvailableWorkMinutes / 60)}h open for tasks. Tuesday found{" "}
+          {schedule.summary.tasksProposed} recommended actions.
         </p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <li>{schedule.summary.tasksProposed} tasks proposed</li>
@@ -103,7 +111,10 @@ export function CalendarAwareScheduleView({
           type="button"
           className="rounded-lg border bg-white px-3 py-1 text-sm"
           disabled={!proposed.length}
-          onClick={() => act("/api/tuesday/schedule/approve-all")}
+          onClick={async () => {
+            await act("/api/tuesday/schedule/approve-all");
+            goAutopilotPending();
+          }}
         >
           Approve all non-conflicting
         </button>
@@ -121,13 +132,15 @@ export function CalendarAwareScheduleView({
       {(viewMode === "queue" || viewMode === "split") && (
         <section className="space-y-3">
           <h3 className="text-sm font-semibold uppercase text-[var(--muted)]">Fundraising tasks</h3>
-          {schedule.tasks.map((task) => (
+          {schedule.tasks
+            .filter((t) => t.schedulingStatus !== "completed")
+            .map((task) => (
             <div key={task.id} className={`rounded-lg border p-4 text-sm ${taskRowClass(task)}`}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="font-semibold">
                     {task.suggestedStart && task.suggestedEnd
-                      ? `${formatRange(task.suggestedStart, task.suggestedEnd)} · `
+                      ? `${formatRange(task.suggestedStart, task.suggestedEnd, schedule.timezone)} · `
                       : "Unscheduled · "}
                     {task.title}
                   </p>
@@ -156,7 +169,10 @@ export function CalendarAwareScheduleView({
                       <button
                         type="button"
                         className="rounded bg-green-700 px-2 py-1 text-xs text-white"
-                        onClick={() => act(`/api/tuesday/schedule/${task.id}/approve`)}
+                        onClick={async () => {
+                          await act(`/api/tuesday/schedule/${task.id}/approve`);
+                          goAutopilotPending();
+                        }}
                       >
                         Approve
                       </button>
@@ -170,7 +186,23 @@ export function CalendarAwareScheduleView({
                     </>
                   )}
                   {task.schedulingStatus === "approved" && (
-                    <span className="text-xs font-medium text-green-800">Approved · draft in Autopilot</span>
+                    <>
+                      <span className="text-xs font-medium text-green-800">Awaiting Autopilot</span>
+                      <button
+                        type="button"
+                        className="rounded border bg-white px-2 py-1 text-xs"
+                        onClick={goAutopilotPending}
+                      >
+                        Open Autopilot
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded border px-2 py-1 text-xs"
+                        onClick={() => act(`/api/tuesday/schedule/${task.id}/complete`)}
+                      >
+                        Mark done
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -192,7 +224,7 @@ export function CalendarAwareScheduleView({
                           })
                         }
                       >
-                        Use {formatRange(slot.start, slot.end)}
+                        Use {formatRange(slot.start, slot.end, schedule.timezone)}
                       </button>
                     </li>
                   ))}
@@ -204,6 +236,18 @@ export function CalendarAwareScheduleView({
             <p className="text-xs text-[var(--muted)]">
               Queue also includes {queueItems.length} prioritized actions from the fundraising engine.
             </p>
+          )}
+          {schedule.tasks.some((t) => t.schedulingStatus === "completed") && (
+            <div className="mt-6 border-t pt-4">
+              <h4 className="text-xs font-semibold uppercase text-[var(--muted)]">Completed</h4>
+              <ul className="mt-2 space-y-1 text-xs text-[var(--muted)]">
+                {schedule.tasks
+                  .filter((t) => t.schedulingStatus === "completed")
+                  .map((t) => (
+                    <li key={t.id}>✓ {t.title}</li>
+                  ))}
+              </ul>
+            </div>
           )}
         </section>
       )}

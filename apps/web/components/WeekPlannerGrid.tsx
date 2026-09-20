@@ -14,12 +14,15 @@ export function WeekPlannerGrid({
   schedule,
   outlookEvents,
   weekStart,
+  timezone,
 }: {
   schedule?: CalendarAwareSchedule | null;
   outlookEvents?: OutlookBusyBlock[];
   weekStart: string;
+  timezone?: string;
 }) {
-  const byDay = buildWeekGrid({ schedule, outlookEvents, weekStart });
+  const zone = schedule?.timezone ?? timezone;
+  const byDay = buildWeekGrid({ schedule, outlookEvents, weekStart, timezone: zone });
   const days = Object.keys(byDay).sort();
 
   if (!days.length) {
@@ -31,6 +34,11 @@ export function WeekPlannerGrid({
 
   return (
     <div className="space-y-4">
+      {zone && (
+        <p className="text-xs text-[var(--muted)]">
+          Times shown in your Outlook timezone ({zone.replace(/_/g, " ")}).
+        </p>
+      )}
       <div className="flex flex-wrap gap-3 text-xs">
         <span className="rounded border border-blue-300 bg-blue-100 px-2 py-1">Busy (Outlook)</span>
         <span className="rounded border border-orange-300 bg-orange-50 px-2 py-1">Proposed task</span>
@@ -53,7 +61,7 @@ export function WeekPlannerGrid({
       <div className="grid gap-4 lg:grid-cols-5">
         {days.map((day) => (
           <div key={day} className="rounded-xl border bg-white p-3">
-            <h4 className="text-sm font-semibold">{dayTitle(day)}</h4>
+            <h4 className="text-sm font-semibold">{dayTitle(day, zone)}</h4>
             <ul className="mt-2 space-y-2">
               {byDay[day].length === 0 && (
                 <li className="text-xs text-[var(--muted)]">No events or tasks this day.</li>

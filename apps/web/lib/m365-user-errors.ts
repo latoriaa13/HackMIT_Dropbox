@@ -1,68 +1,161 @@
-/** Map API error JSON from m365ErrorToHttpResponse into user-facing copy. */
-export function formatM365UserError(data: {
-  code?: string;
-  message?: string;
-  connectUrl?: string;
-  requiredScopes?: string[];
-}): {
+import type { MicrosoftAccountKind } from "@tuesday/m365";
+
+export type M365UserErrorAction = {
+  label: string;
+  consent: "calendar" | "mail" | "full";
+  returnTo?: string;
+  accountKind?: MicrosoftAccountKind;
+  reauth?: boolean;
+};
+
+export type M365UserErrorContext = {
+  accountEmail?: string | null;
+  outlookReady?: boolean;
+  missingCalendarConsent?: boolean;
+};
+
+/** Map API error JSON into plain-language copy for fundraisers (no technical jargon). */
+export function formatM365UserError(
+  data: {
+    code?: string;
+    message?: string;
+    connectUrl?: string;
+    requiredScopes?: string[];
+  },
+  context?: M365UserErrorContext
+): {
   title: string;
   detail: string;
-  action?: { label: string; consent: "calendar" | "mail" | "full"; returnTo?: string };
+  action?: M365UserErrorAction;
+  severity: "warning" | "error";
 } {
   const code = data.code ?? "MICROSOFT365_ERROR";
-  const message = data.message ?? "Something went wrong with Microsoft 365.";
+  const needsCalendar = data.requiredScopes?.some((s) => s.includes("Calendar"));
+  const needsMail = data.requiredScopes?.some((s) => s.includes("Mail"));
+  const signedInWithCalendar =
+    context?.outlookReady === true && context?.missingCalendarConsent === false;
+
+  const syncFailedCopy = (detailText?: string) => ({
+    title: "Couldn't load this week's calendar",
+    detail:
+      detailText ||
+      "You're signed in to Microsoft Outlook. We couldn't load meetings for this week just now. Click Refresh calendar to try again.",
+    severity: "warning" as const,
+  });
+
+  if (code === "MICROSOFT365_CALENDAR_SYNC_FAILED") {
+    return syncFailedCopy(plainMessage(data.message) ?? data.message);
+  }
+
+  if (
+    code !== "MICROSOFT365_NOT_CONNECTED" &&
+    signedInWithCalendar &&
+    (code === "MICROSOFT365_PERMISSION_ERROR" || needsCalendar)
+  ) {
+    const detailText = plainMessage(data.message) ?? data.message;
+    return syncFailedCopy(detailText);
+  }
 
   switch (code) {
     case "MICROSOFT365_NOT_CONNECTED":
       return {
-        title: "Microsoft 365 not connected",
-        detail: "Sign in with Microsoft before using calendar or mail features.",
-        action: { label: "Connect Microsoft 365", consent: "full", returnTo: "/" },
+        title: "Outlook not connected",
+        detail:
+          plainMessage(data.message) ??
+          "Sign in with Microsoft before building a calendar-aware schedule or sending email.",
+        action: { label: "Connect Outlook", consent: "full", returnTo: "/" },
+        severity: "error",
       };
     case "MICROSOFT365_PERMISSION_ERROR": {
-      const needsCalendar = data.requiredScopes?.some((s) => s.includes("Calendar"));
-      const needsMail = data.requiredScopes?.some((s) => s.includes("Mail"));
+      const detailText = plainMessage(data.message) ?? data.message ?? "";
       if (needsCalendar) {
         return {
-          title: "Calendar permission required",
+          title: "Calendar access needed",
           detail:
-            "Tuesday can see your profile but not your Outlook calendar yet. Connect calendar access the same way as mail — Microsoft will show a consent screen for Calendars.Read.",
+            detailText ||
+            "Tuesday needs permission to view your Outlook calendar. Click Connect calendar and choose Allow when Microsoft asks.",
           action: { label: "Connect calendar", consent: "calendar", returnTo: "/" },
+          severity: "error",
         };
       }
       if (needsMail) {
         return {
-          title: "Mail permission required",
-          detail: "Grant mail permissions to draft and send email through Autopilot.",
+          title: "Email access needed",
+          detail:
+            "Tuesday needs permission to use your Outlook email. Open Autopilot, click Connect mail, and choose Allow when Microsoft asks.",
           action: { label: "Connect mail", consent: "mail", returnTo: "/autopilot" },
+          severity: "error",
         };
       }
       return {
-        title: "Additional Microsoft permission required",
-        detail: message,
-        action: { label: "Review permissions", consent: "full", returnTo: "/" },
+        title: "Calendar access needed",
+        detail:
+          plainMessage(data.message) ??
+          "We couldn't load your Outlook calendar for this week. Click Connect calendar and choose Allow when Microsoft asks.",
+        action: { label: "Connect calendar", consent: "calendar", returnTo: "/" },
+        severity: "error",
       };
     }
     case "MICROSOFT365_CONFIGURATION_ERROR":
       return {
-        title: "Microsoft Entra not configured",
-        detail: "Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET in .env.local, then restart the dev server.",
+        title: "Sign-in not available",
+        detail:
+          "Tuesday isn't set up for Microsoft sign-in on this copy of the app yet. Ask whoever manages Tuesday to finish setup.",
+        severity: "error",
       };
     default:
-      if (message.toLowerCase().includes("admin consent")) {
+      if (looksTechnical(data.message)) {
+        if (needsCalendar && signedInWithCalendar) {
+          return syncFailedCopy();
+        }
+        if (needsCalendar) {
+          return {
+            title: "Calendar access needed",
+            detail:
+              "We couldn't read your Outlook calendar. Try Connect calendar and choose Allow when Microsoft asks.",
+            action: { label: "Connect calendar", consent: "calendar", returnTo: "/" },
+            severity: "error",
+          };
+        }
+        if (needsMail) {
+          return {
+            title: "Email access needed",
+            detail: "We couldn't use your Outlook email. Try Connect mail from Autopilot.",
+            action: { label: "Connect mail", consent: "mail", returnTo: "/autopilot" },
+            severity: "error",
+          };
+        }
+        if (signedInWithCalendar) {
+          return syncFailedCopy();
+        }
         return {
-          title: "Admin consent required",
+          title: "Something went wrong",
           detail:
-            "Your Azure tenant requires an administrator to grant delegated Graph permissions for this app. In Entra → App registrations → API permissions → Grant admin consent for org.",
+            "We couldn't connect to Outlook. Try Disconnect, then connect again with the account you use in Outlook.",
+          action: { label: "Connect again", consent: "full", returnTo: "/" },
+          severity: "error",
         };
       }
-      if (message.toLowerCase().includes("calendar permission")) {
-        return {
-          title: "Calendar permission required",
-          detail: message,
-          action: { label: "Connect calendar", consent: "calendar", returnTo: "/" },
-        };
-      }
-      return { title: "Microsoft 365 error", detail: message };
+      return {
+        title: "Outlook connection issue",
+        detail: plainMessage(data.message) ?? "Please try connecting to Outlook again.",
+        action: { label: "Connect again", consent: "full", returnTo: "/" },
+        severity: signedInWithCalendar ? "warning" : "error",
+      };
   }
+}
+
+function looksTechnical(message?: string): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    /graph|oauth|token|scope|entra|azure|403|401|api|delegated|mailboxnot|calendars\.read|mail\.send/.test(
+      m
+    )
+  );
+}
+
+function plainMessage(message?: string): string | undefined {
+  if (!message || looksTechnical(message)) return undefined;
+  return message;
 }

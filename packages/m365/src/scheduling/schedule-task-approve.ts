@@ -3,6 +3,7 @@ import { ACTION_LABELS } from "@tuesday/core";
 import type { Microsoft365Provider } from "../provider/interface";
 import { appendAudit } from "../storage/audit-log";
 import { recordConstituentActivity } from "../storage/constituent-activity";
+import { getUserSchedule, saveUserSchedule } from "../storage/schedule-store";
 
 function eventSubject(task: SchedulableFundraisingTask): string {
   return `Tuesday: ${ACTION_LABELS[task.actionType]} — ${task.constituentName}`;
@@ -25,7 +26,8 @@ export async function approveScheduleTaskDraft(
   provider: Microsoft365Provider,
   userId: string,
   task: SchedulableFundraisingTask,
-  appBaseUrl: string
+  appBaseUrl: string,
+  timezone?: string
 ) {
   if (!task.suggestedStart || !task.suggestedEnd) {
     throw new Error("Task has no proposed time");
@@ -39,7 +41,7 @@ export async function approveScheduleTaskDraft(
     subject: eventSubject(task),
     start: task.suggestedStart,
     end: task.suggestedEnd,
-    timezone: "America/New_York",
+    timezone: timezone ?? getUserSchedule(userId)?.timezone ?? "America/New_York",
     location: withAttendees ? "Video call (TBD)" : undefined,
     attendees: [],
     body: eventBody(task, appBaseUrl),
@@ -87,4 +89,49 @@ export function applyTaskDenial(schedule: CalendarAwareSchedule, taskId: string)
       t.id === taskId ? { ...t, schedulingStatus: "denied" } : t
     ),
   };
+}
+
+export function applyTaskComplete(schedule: CalendarAwareSchedule, taskId: string): CalendarAwareSchedule {
+  return {
+    ...schedule,
+    tasks: schedule.tasks.map((t) =>
+      t.id === taskId ? { ...t, schedulingStatus: "completed" } : t
+    ),
+  };
+}
+
+/** After Autopilot sends the linked Outlook event draft, mark the weekly-plan task done. */
+export function completeScheduleTaskByOutlookDraft(userId: string, outlookDraftId: string): boolean {
+  const schedule = getUserSchedule(userId);
+  if (!schedule) return false;
+  const task = schedule.tasks.find((t) => t.outlookDraftId === outlookDraftId);
+  if (!task) return false;
+  saveUserSchedule(userId, applyTaskComplete(schedule, task.id));
+  appendAudit({
+    userId,
+    actionType: "schedule.task_completed",
+    target: task.id,
+    status: "executed",
+    payloadSummary: task.title,
+    executedAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+export function completeScheduleTask(userId: string, taskId: string): CalendarAwareSchedule | null {
+  const schedule = getUserSchedule(userId);
+  if (!schedule) return null;
+  const task = schedule.tasks.find((t) => t.id === taskId);
+  if (!task) return null;
+  const updated = applyTaskComplete(schedule, taskId);
+  saveUserSchedule(userId, updated);
+  appendAudit({
+    userId,
+    actionType: "schedule.task_completed",
+    target: taskId,
+    status: "executed",
+    payloadSummary: task.title,
+    executedAt: new Date().toISOString(),
+  });
+  return updated;
 }
