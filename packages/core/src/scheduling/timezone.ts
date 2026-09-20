@@ -71,9 +71,14 @@ export function dayKeysInZone(weekStart: string, workDays: number, zone: string)
 
 export function formatTimeRangeInZone(startUtcIso: string, endUtcIso: string, zone: string): string {
   const iana = assertIanaZone(zone);
-  const fmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", timeZone: iana };
-  const s = new Date(startUtcIso).toLocaleTimeString([], fmt);
-  const e = new Date(endUtcIso).toLocaleTimeString([], fmt);
+  const fmt: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: iana,
+  };
+  const s = new Date(startUtcIso).toLocaleTimeString("en-US", fmt);
+  const e = new Date(endUtcIso).toLocaleTimeString("en-US", fmt);
   return `${s}–${e}`;
 }
 

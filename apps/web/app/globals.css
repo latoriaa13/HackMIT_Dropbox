@@ -1,9 +1,13 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --donorex-orange: #ff6b00;
   --donorex-orange-hover: #e56000;
   --donorex-navy: #0b192c;
+  --donorex-navy-ink: #0b192c;
+  --donorex-muted-on-white: #64748b;
   --bg: #ffffff;
   --surface: #ffffff;
   --ink: #0b192c;
@@ -15,12 +19,22 @@
   --panel: #f8fafc;
 }
 
+html.dark {
+  --bg: #0a1628;
+  --surface: #0f1f35;
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --accent-soft: #431407;
+  --border: #1e3a5f;
+  --panel: #132a45;
+  --donorex-navy: #cbd5e1;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-inter, "Inter"), system-ui, sans-serif;
 }
-
 .shadow-xs {
   box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
 }
@@ -28,7 +42,7 @@ body {
 .donorex-panel {
   border-radius: 1rem;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 50%, white);
+  background: color-mix(in srgb, var(--panel) 55%, var(--surface));
   box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
 }
 
@@ -51,11 +65,222 @@ body {
 .donorex-input {
   border-radius: 0.75rem;
   border: 1px solid var(--border);
-  background: white;
+  background: var(--surface);
+  color: var(--ink);
   box-shadow: 0 1px 2px rgb(15 23 42 / 6%);
 }
 
 .donorex-input:focus {
   border-color: var(--donorex-orange);
   outline: none;
+}
+
+.sign-in-social-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  border-radius: 9999px;
+  border: none;
+  background: #ececee;
+  padding: 0.8125rem 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: #0a0a0a;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.sign-in-social-btn:hover {
+  background: #e2e2e5;
+}
+
+html.dark .sign-in-social-btn {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+html.dark .sign-in-social-btn:hover {
+  background: #334155;
+}
+
+.sign-in-social-btn:disabled,
+.sign-in-social-btn.sign-in-social-btn--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sign-in-social-btn.sign-in-social-btn--disabled:hover {
+  background: #ececee;
+}
+
+html.dark .sign-in-social-btn.sign-in-social-btn--disabled:hover {
+  background: #1e293b;
+}
+
+.sign-in-continue-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  background: #0a0a0a;
+  padding: 0.8125rem 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+.sign-in-continue-btn:hover {
+  opacity: 0.92;
+}
+
+html.dark .sign-in-continue-btn {
+  background: #f8fafc;
+  color: #0a0a0a;
+}
+
+.sign-in-or {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.25rem 0;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sign-in-or::before,
+.sign-in-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.sign-in-email-input {
+  width: 100%;
+  border-radius: 0.625rem;
+  border: 1px solid #d4d4d8;
+  background: var(--surface);
+  padding: 0.875rem 1rem;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.sign-in-email-input::placeholder {
+  color: #a1a1aa;
+}
+
+.sign-in-email-input:focus {
+  border-color: #a1a1aa;
+  outline: none;
+}
+
+.sign-in-email-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.donorex-logo-light,
+.rex-avatar-light {
+  opacity: 1;
+  visibility: visible;
+}
+.donorex-logo-dark,
+.rex-avatar-dark {
+  opacity: 0;
+  visibility: hidden;
+}
+html.dark .donorex-logo-light,
+html.dark .rex-avatar-light {
+  opacity: 0;
+  visibility: hidden;
+}
+html.dark .donorex-logo-dark,
+html.dark .rex-avatar-dark {
+  opacity: 1;
+  visibility: visible;
+}
+
+/** White cards stay white in dark mode — text uses brand navy, not page --ink */
+html.dark
+  :is(.bg-white, .bg-white\/50, .bg-white\/80):not(.ask-rex-chat):not(.ask-rex-launcher) {
+  --ink: var(--donorex-navy-ink);
+  --muted: var(--donorex-muted-on-white);
+  color: var(--donorex-navy-ink);
+}
+
+html.dark
+  :is(.bg-white, .bg-white\/50, .bg-white\/80):not(.ask-rex-chat):not(.ask-rex-launcher)
+  :where(h1, h2, h3, h4, h5, h6, p, li, label, legend, dt, dd, strong, span, td, th) {
+  color: inherit;
+}
+
+html.dark
+  :is(.bg-white, .bg-white\/50, .bg-white\/80):not(.ask-rex-chat):not(.ask-rex-launcher)
+  :where([class*="text-[var(--ink)]"], [class*="text-[var(--muted)]"]) {
+  color: var(--muted);
+}
+
+html.dark
+  :is(.bg-white, .bg-white\/50, .bg-white\/80):not(.ask-rex-chat):not(.ask-rex-launcher)
+  :where([class*="text-[var(--donorex-navy)]"]) {
+  color: var(--donorex-navy-ink);
+}
+
+html.dark
+  :is(.bg-white, .bg-white\/50, .bg-white\/80):not(.ask-rex-chat):not(.ask-rex-launcher)
+  [class*="text-slate-"] {
+  color: var(--donorex-muted-on-white);
+}
+
+/** Ask Rex — always light, high-contrast (unaffected by page dark mode) */
+.ask-rex-chat,
+.ask-rex-launcher {
+  --chat-ink: #0b192c;
+  --chat-muted: #475569;
+  --chat-border: #e2e8f0;
+  --chat-surface: #ffffff;
+  --chat-header: #fff7ed;
+  --chat-rex-bubble: #f1f5f9;
+  color: var(--chat-ink);
+}
+
+.ask-rex-chat .ask-rex-title {
+  color: var(--chat-ink);
+}
+.ask-rex-chat .ask-rex-subtitle,
+.ask-rex-chat .ask-rex-muted {
+  color: var(--chat-muted);
+}
+.ask-rex-chat .ask-rex-rex-bubble {
+  background: var(--chat-rex-bubble);
+  color: var(--chat-ink);
+}
+.ask-rex-chat .ask-rex-input {
+  background: var(--chat-surface);
+  border: 1px solid var(--chat-border);
+  color: var(--chat-ink);
+}
+.ask-rex-chat .ask-rex-input::placeholder {
+  color: #94a3b8;
+}
+
+.ask-rex-chat .rex-avatar-light,
+.ask-rex-launcher .rex-avatar-light {
+  opacity: 1;
+  visibility: visible;
+}
+.ask-rex-chat .rex-avatar-dark,
+.ask-rex-launcher .rex-avatar-dark {
+  opacity: 0;
+  visibility: hidden;
 }

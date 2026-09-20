@@ -221,3 +221,8 @@ export function formatTime(minutesFromMidnight: number): string {
   const hour12 = h % 12 === 0 ? 12 : h % 12;
   return `${hour12}:${m.toString().padStart(2, "0")} ${suffix}`;
 }
+
+/** Format hour-of-day (0–23) for UI copy, e.g. 17 → "5:00 PM". */
+export function formatHour12(hour24: number): string {
+  return formatTime(hour24 * 60);
+}

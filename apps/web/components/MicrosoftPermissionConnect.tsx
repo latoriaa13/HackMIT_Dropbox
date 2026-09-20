@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { ConsentKind, MicrosoftAccountKind } from "@tuesday/m365";
 import { markMicrosoftOAuthAttempt } from "@/lib/oauth-errors";
 import { microsoftConnectHref } from "@/lib/m365-connect";
@@ -8,8 +9,9 @@ type Props = {
   returnTo?: string;
   consent: ConsentKind;
   label: string;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "social" | "signin";
   className?: string;
+  children?: ReactNode;
   reauth?: boolean;
   pickAccount?: boolean;
   accountKind?: MicrosoftAccountKind;
@@ -21,6 +23,7 @@ export function MicrosoftPermissionConnect({
   label,
   variant = "secondary",
   className = "",
+  children,
   reauth = false,
   pickAccount = false,
   accountKind = "default",
@@ -29,15 +32,19 @@ export function MicrosoftPermissionConnect({
   const base =
     variant === "primary"
       ? "rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-      : "rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-stone-50";
+      : variant === "social"
+        ? "sign-in-social-btn"
+        : variant === "signin"
+          ? "sign-in-continue-btn"
+          : "rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-stone-50";
 
   return (
     <a
       href={href}
       onClick={() => markMicrosoftOAuthAttempt()}
-      className={`inline-block ${base} ${className}`}
+      className={`${variant === "social" || variant === "signin" ? "block w-full" : "inline-block"} ${base} ${className}`}
     >
-      {label}
+      {children ?? label}
     </a>
   );
 }

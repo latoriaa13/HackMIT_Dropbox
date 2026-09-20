@@ -10,13 +10,14 @@ const LINKS = [
   { href: "/communities", label: "Communities" },
   { href: "/segments", label: "Segments" },
   { href: "/autopilot", label: "Autopilot" },
+  { href: "/welcome", label: "Account" },
 ] as const;
 
 export function AppNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="w-full border-b border-slate-200 bg-white">
+    <nav className="w-full border-b border-[var(--border)] bg-[var(--surface)]">
       <div className="mx-auto max-w-5xl px-4">
         <ul className="flex flex-wrap items-center justify-center gap-4 py-3 text-sm font-bold text-[var(--donorex-navy)] sm:gap-8">
           {LINKS.map(({ href, label }) => {

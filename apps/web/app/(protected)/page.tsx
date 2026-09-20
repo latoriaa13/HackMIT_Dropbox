@@ -16,11 +16,9 @@ import { QueueCard } from "@/components/QueueCard";
 import { OutlookConnectionCard } from "@/components/OutlookConnectionCard";
 import { CalendarAwareScheduleView } from "@/components/CalendarAwareScheduleView";
 import { formatCurrency } from "@/lib/format";
-import { applyFeedbackDeprioritize, feedbackCount } from "@/lib/feedback";
+import { applyFeedbackDeprioritize } from "@/lib/feedback";
 import { formatM365UserError } from "@/lib/m365-user-errors";
 import { MicrosoftPermissionConnect } from "@/components/MicrosoftPermissionConnect";
-import { M365SessionProvider } from "@/components/M365SessionContext";
-import { DevPortWarning } from "@/components/DevPortWarning";
 
 const OBJECTIVES: { value: FundraisingObjective; label: string }[] = [
   { value: "protect_renewals", label: "Protect renewals" },
@@ -45,11 +43,11 @@ export default function WeeklyPlanPage() {
     "stewardship_message",
   ]);
   const [weekStart, setWeekStart] = useState(() => defaultPlanningWeekStartIso());
-  const [workingHoursStart, setWorkingHoursStart] = useState(9);
-  const [workingHoursEnd, setWorkingHoursEnd] = useState(17);
-  const [lunchStartHour, setLunchStartHour] = useState(12);
-  const [lunchEndHour, setLunchEndHour] = useState(13);
-  const [bufferMinutes, setBufferMinutes] = useState(15);
+  const workingHoursStart = 9;
+  const workingHoursEnd = 17;
+  const lunchStartHour = 12;
+  const lunchEndHour = 13;
+  const bufferMinutes = 15;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ReturnType<typeof formatM365UserError> | null>(null);
   const [result, setResult] = useState<BuildTuesdayResult | null>(null);
@@ -59,7 +57,6 @@ export default function WeeklyPlanPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [metaError, setMetaError] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState<string>("");
-  const [feedbackTotal, setFeedbackTotal] = useState(0);
   const [outlookPreview, setOutlookPreview] = useState<OutlookBusyBlock[]>([]);
   const [outlookTimezone, setOutlookTimezone] = useState<string | undefined>();
 
@@ -168,7 +165,6 @@ export default function WeeklyPlanPage() {
           items: applyFeedbackDeprioritize(data.items),
         });
       }
-      setFeedbackTotal(feedbackCount());
     } catch (e) {
       setError({
         title: "Build failed",
@@ -230,9 +226,7 @@ export default function WeeklyPlanPage() {
   };
 
   return (
-    <M365SessionProvider>
     <div className="space-y-8">
-      <DevPortWarning />
       <OutlookConnectionCard
         planningWeekStart={weekStart}
         onConnectionChange={(ready, meta) => {
@@ -312,7 +306,7 @@ export default function WeeklyPlanPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 max-w-xs">
           <label className="text-sm">
             Planning week (Monday)
             <input
@@ -322,61 +316,9 @@ export default function WeeklyPlanPage() {
               onChange={(e) => setWeekStart(e.target.value)}
             />
           </label>
-          <label className="text-sm">
-            Work day start (hour, default 9 AM)
-            <input
-              type="number"
-              min={6}
-              max={12}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={workingHoursStart}
-              onChange={(e) => setWorkingHoursStart(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Work day end (hour, default 5 PM)
-            <input
-              type="number"
-              min={13}
-              max={21}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={workingHoursEnd}
-              onChange={(e) => setWorkingHoursEnd(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Buffer between tasks (min)
-            <input
-              type="number"
-              min={0}
-              max={60}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={bufferMinutes}
-              onChange={(e) => setBufferMinutes(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Lunch start (hour)
-            <input
-              type="number"
-              min={11}
-              max={14}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={lunchStartHour}
-              onChange={(e) => setLunchStartHour(Number(e.target.value))}
-            />
-          </label>
-          <label className="text-sm">
-            Lunch end (hour)
-            <input
-              type="number"
-              min={12}
-              max={15}
-              className="mt-1 w-full rounded-lg border px-2 py-1"
-              value={lunchEndHour}
-              onChange={(e) => setLunchEndHour(Number(e.target.value))}
-            />
-          </label>
+          <p className="mt-2 text-xs text-[var(--muted)]">
+            Work hours stay Mon–Fri, 9:00 AM–5:00 PM with a noon lunch block when scheduling around Outlook.
+          </p>
         </div>
 
         <fieldset className="mt-6">
@@ -460,7 +402,6 @@ export default function WeeklyPlanPage() {
           <p className="text-sm text-[var(--muted)]">
             {result.items.length} actions · {result.minutesUsed} / {result.minutesBudget} minutes ·{" "}
             {result.candidateCount} candidates scored
-            {feedbackTotal > 0 && ` · ${feedbackTotal} feedback note(s) in this browser`}
           </p>
 
           {schedule && outlookConnected ? (
@@ -513,7 +454,6 @@ export default function WeeklyPlanPage() {
         </section>
       )}
     </div>
-    </M365SessionProvider>
   );
 }
 

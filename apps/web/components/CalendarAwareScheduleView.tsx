@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { CalendarAwareSchedule, SchedulableFundraisingTask } from "@tuesday/core";
-import { formatTimeRangeInZone } from "@tuesday/core";
+import { formatHour12, formatTimeRangeInZone } from "@tuesday/core";
 import { formatCurrency } from "@/lib/format";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -75,7 +75,8 @@ export function CalendarAwareScheduleView({
         <p className="font-medium">Weekly plan · {schedule.weekStart} – {schedule.weekEnd}</p>
         <p className="mt-1 text-[var(--muted)]">
           {staffHours}h fundraising budget · {schedule.preferences.workDays}-day week,{" "}
-          {schedule.preferences.workingHoursStart}:00–{schedule.preferences.workingHoursEnd}:00 (
+          {formatHour12(schedule.preferences.workingHoursStart)}–
+          {formatHour12(schedule.preferences.workingHoursEnd)} (
           {schedule.preferences.workDays *
             (schedule.preferences.workingHoursEnd - schedule.preferences.workingHoursStart)}
           h capacity before Outlook). Outlook shows {schedule.summary.outlookMeetingCount} meetings and{" "}
